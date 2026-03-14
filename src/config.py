@@ -3,13 +3,9 @@ from pathlib import Path
 
 # Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-PRIMARY_MODEL = os.getenv("PRIMARY_MODEL", "gemini-2.5-flash")
-
-FALLBACK_CHAIN = [
-    PRIMARY_MODEL,
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite-preview-06-17",
-]
+# Set PRIMARY_MODEL="auto" (default) to auto-detect the latest flash model
+PRIMARY_MODEL = os.getenv("PRIMARY_MODEL", "auto")
+FALLBACK_MODEL = "gemini-2.5-flash"
 
 # Paths — inside Docker, saves are always mounted at /saves
 SAVE_FOLDER = Path(os.getenv("WATCH_PATH", "/saves"))
