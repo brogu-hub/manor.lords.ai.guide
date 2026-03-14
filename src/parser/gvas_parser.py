@@ -1,98 +1,144 @@
-"""GVAS save file parser wrapping SavConverter."""
+"""GVAS save file parser using Oodle Kraken decompression + uesave CLI.
 
+Manor Lords saves are Oodle Kraken compressed. Pipeline:
+  1. Decompress with Kraken_Decompress (ooz shared library via ctypes)
+  2. Parse decompressed GVAS with uesave CLI → JSON
+  3. Return parsed dict
+"""
+
+import ctypes
 import json
 import logging
+import subprocess
+import tempfile
 from pathlib import Path
-
-from SavConverter import read_sav, sav_to_json
 
 logger = logging.getLogger(__name__)
 
+# Path to the compiled ooz shared library (built from rarten/ooz)
+_OOZ_LIB_PATH = "/opt/libooz.so"
+_UESAVE_PATH = "/usr/local/bin/uesave"
 
-def parse_save(file_path: str | Path) -> list | dict:
-    """Parse a UE4 .sav file and return the raw GVAS property tree.
+# Lazy-loaded decompressor
+_kraken_fn = None
 
-    SavConverter returns a list of property objects, each with:
-        - type: e.g. "HeaderProperty", "StructProperty", "IntProperty"
-        - name: the property name
-        - value: the property value (can be nested)
+
+def _get_kraken():
+    """Lazy-load the Kraken decompression function from libooz.so."""
+    global _kraken_fn
+    if _kraken_fn is not None:
+        return _kraken_fn
+
+    lib = ctypes.CDLL(_OOZ_LIB_PATH)
+    # C++ mangled name for: int Kraken_Decompress(const byte*, size_t, byte*, size_t)
+    fn = lib._Z17Kraken_DecompressPKhmPhm
+    fn.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+    fn.restype = ctypes.c_int
+    _kraken_fn = fn
+    logger.info("Loaded Kraken decompressor from %s", _OOZ_LIB_PATH)
+    return fn
+
+
+def _get_uncompressed_size(save_path: Path) -> int | None:
+    """Try to read uncompressed size from the companion _descr.sav file."""
+    descr_path = save_path.parent / (save_path.stem + "_descr.sav")
+    if not descr_path.exists():
+        return None
+
+    try:
+        result = subprocess.run(
+            [_UESAVE_PATH, "to-json"],
+            stdin=open(descr_path, "rb"),
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        descr = json.loads(result.stdout)
+        return descr.get("root", {}).get("properties", {}).get("UncompressedSize_0")
+    except Exception as e:
+        logger.warning("Could not read descr file: %s", e)
+        return None
+
+
+def decompress_save(file_path: str | Path) -> bytes:
+    """Decompress an Oodle Kraken compressed .sav file.
+
+    Returns the raw decompressed GVAS bytes.
+    """
+    path = Path(file_path)
+    compressed = path.read_bytes()
+
+    # Try to get uncompressed size from descr file
+    uncompressed_size = _get_uncompressed_size(path)
+    if uncompressed_size is None:
+        # Estimate: Manor Lords saves compress ~5:1
+        uncompressed_size = len(compressed) * 8
+        logger.warning(
+            "No descr file found, estimating uncompressed size: %d", uncompressed_size
+        )
+
+    kraken = _get_kraken()
+    dst = ctypes.create_string_buffer(uncompressed_size + 65536)
+    result = kraken(compressed, len(compressed), dst, uncompressed_size)
+
+    if result <= 0:
+        raise RuntimeError(
+            f"Kraken decompression failed (returned {result}). "
+            f"Compressed: {len(compressed)} bytes, target: {uncompressed_size}"
+        )
+
+    logger.info(
+        "Decompressed %d → %d bytes", len(compressed), result
+    )
+    return dst.raw[:result]
+
+
+def parse_save(file_path: str | Path) -> dict:
+    """Parse a Manor Lords .sav file and return the game state as a dict.
+
+    Steps:
+      1. Decompress with Oodle Kraken
+      2. Parse decompressed GVAS with uesave CLI
+      3. Return the root properties dict
 
     Args:
         file_path: Path to the .sav file.
 
     Returns:
-        The full GVAS property tree (typically a list of property dicts).
+        The parsed save data as a nested dict (uesave JSON format).
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Save file not found: {path}")
 
-    logger.info("Parsing save file: %s", path)
-    props = read_sav(str(path))
-    raw = sav_to_json(props, string=False)
+    logger.info("Parsing save file: %s", path.name)
 
-    count = len(raw) if isinstance(raw, (list, dict)) else 0
-    logger.info("Parsed successfully — %d top-level properties", count)
-    return raw
+    # Step 1: Decompress
+    decompressed = decompress_save(path)
+
+    # Step 2: Parse with uesave
+    result = subprocess.run(
+        [_UESAVE_PATH, "to-json"],
+        input=decompressed,
+        capture_output=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(f"uesave parsing failed: {stderr}")
+
+    raw = json.loads(result.stdout)
+
+    # Extract the properties dict from uesave's output format
+    properties = raw.get("root", {}).get("properties", {})
+    logger.info("Parsed successfully — %d top-level properties", len(properties))
+
+    return properties
 
 
 def parse_save_to_json_string(file_path: str | Path) -> str:
     """Parse a .sav file and return the JSON as a formatted string."""
     raw = parse_save(file_path)
     return json.dumps(raw, indent=2, ensure_ascii=False)
-
-
-def properties_to_dict(props: list) -> dict:
-    """Convert a SavConverter property list to a nested dict for easier traversal.
-
-    Converts:
-        [{"type": "IntProperty", "name": "year", "value": 3}, ...]
-    Into:
-        {"year": 3, ...}
-
-    For StructProperty with nested values, recurses into the value list.
-    For ArrayProperty, preserves the array structure.
-    """
-    result = {}
-    for prop in props:
-        if not isinstance(prop, dict):
-            continue
-
-        prop_type = prop.get("type", "")
-        name = prop.get("name", "")
-
-        if prop_type in ("NoneProperty", "FileEndProperty", "HeaderProperty"):
-            continue
-
-        if not name:
-            continue
-
-        if prop_type == "StructProperty":
-            value = prop.get("value", [])
-            if isinstance(value, list):
-                result[name] = properties_to_dict(value)
-            else:
-                result[name] = value
-
-        elif prop_type == "ArrayProperty":
-            arr_values = prop.get("value", [])
-            if isinstance(arr_values, list) and arr_values and isinstance(arr_values[0], dict):
-                # Array of structs
-                result[name] = [
-                    properties_to_dict(item) if isinstance(item, list)
-                    else properties_to_dict(item.get("value", [])) if isinstance(item, dict) and "value" in item and isinstance(item["value"], list)
-                    else item.get("value", item) if isinstance(item, dict)
-                    else item
-                    for item in arr_values
-                ]
-            else:
-                result[name] = arr_values
-
-        elif prop_type == "MapProperty":
-            result[name] = prop.get("value", {})
-
-        else:
-            # Simple types: IntProperty, FloatProperty, BoolProperty, StrProperty, etc.
-            result[name] = prop.get("value")
-
-    return result

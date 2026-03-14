@@ -19,6 +19,9 @@ __pycache__/
 !configs/*.yaml
 session_history.json
 
+# Binaries
+uesave.tar.xz
+
 # OS
 Thumbs.db
 .DS_Store

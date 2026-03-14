@@ -1,9 +1,15 @@
-"""Map raw GVAS JSON property tree to clean GameState using YAML config."""
+"""Map raw uesave JSON to clean GameState.
+
+Manor Lords save structure (uesave format):
+  root.properties.savedRegions_0[N] — region data (player region has isSettled_0=True)
+  root.properties.savedBuildings_0[] — all buildings with Inventory_0
+  root.properties.savedUnits_0[] — all units (Ox, Husband, Wife, Son, etc.)
+  root.properties.savedLords_0[] — lord data (treasury, influence)
+  root.properties.Year_0, day_0 — time
+"""
 
 import logging
-from pathlib import Path
-
-import yaml
+from collections import Counter
 
 from src.mapper.schemas import (
     BuildingInfo,
@@ -22,138 +28,251 @@ from src.mapper.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Manor Lords resource type ID → name mapping
+# Discovered from save file analysis
+RESOURCE_TYPES = {
+    1: "timber",
+    3: "stone",
+    4: "planks",
+    5: "firewood",
+    6: "iron_ore",
+    7: "iron_slabs",
+    8: "clay",
+    9: "tiles",
+    10: "bread",
+    11: "flour",
+    12: "grain",  # wheat/emmer
+    13: "berries",
+    14: "meat",
+    15: "hides",
+    16: "leather",
+    17: "linen",
+    18: "yarn",
+    23: "ale",
+    27: "malt",
+    28: "vegetables",
+    29: "eggs",
+    30: "fish",
+    31: "honey",
+    32: "charcoal",
+    33: "tools",
+    34: "shoes",
+    35: "cloaks",
+    36: "shields",
+    37: "swords",
+    38: "bows",
+    39: "arrows",
+    40: "spears",
+    41: "polearms",
+    42: "helmets",
+    43: "armor",
+    44: "horses",
+    45: "salt",
+    46: "dye",
+    47: "herbs",
+    48: "wax",
+    49: "candles",
+    50: "apples",
+    172: "timber",  # Alternate timber ID seen in saves
+    216: "stone",   # Alternate stone ID seen in saves
+    234: "ox",      # Livestock
+}
 
-def load_mapper_config(config_path: str | Path | None = None) -> dict:
-    """Load the GVAS-to-GameState mapper YAML config."""
-    if config_path is None:
-        config_path = Path(__file__).parent.parent.parent / "configs" / "manor_lords_mapper.yaml"
-    config_path = Path(config_path)
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+# Building type ID → name mapping
+BUILDING_TYPES = {
+    30: "logging_camp",
+    39: "hitching_post",
+    85: "burgage_plot",
+    87: "well",
+    88: "storehouse",
+    100: "marketplace",
+    115: "road",
+}
+
+# Day-to-season mapping (Manor Lords has ~365 days/year)
+def _day_to_season(day: int) -> str:
+    """Convert day-of-year to season name."""
+    if day < 91:
+        return "Spring"
+    elif day < 182:
+        return "Summer"
+    elif day < 274:
+        return "Autumn"
+    else:
+        return "Winter"
 
 
-def get_nested_value(data: dict, path: str, default=None):
-    """Traverse a nested dict/list using a dot-separated path.
-
-    Supports:
-        - Dot notation: 'a.b.c'
-        - Array indices: 'a.b[0].c'
-    """
-    keys = []
-    for part in path.split("."):
-        if "[" in part:
-            key, idx = part.split("[")
-            keys.append(key)
-            keys.append(int(idx.rstrip("]")))
-        else:
-            keys.append(part)
-
-    current = data
-    for key in keys:
-        try:
-            if isinstance(key, int):
-                current = current[key]
-            elif isinstance(current, dict):
-                current = current[key]
-            else:
-                return default
-        except (KeyError, IndexError, TypeError):
-            return default
-    return current
+def _find_player_region(regions: list) -> dict | None:
+    """Find the player's settled region."""
+    for region in regions:
+        if region.get("isSettled_0") and region.get("settlementType_0") == "ESettlementType::Town":
+            return region
+    # Fallback: first settled region
+    for region in regions:
+        if region.get("isSettled_0"):
+            return region
+    return None
 
 
-def map_state(raw_json: list | dict, config: dict | None = None) -> GameState:
-    """Map raw GVAS JSON to a clean GameState object.
+def _find_player_lord(lords: list) -> dict | None:
+    """Find the player's lord (non-AI, non-bandit)."""
+    for lord in lords:
+        if not lord.get("isAI_0") and not lord.get("isBandit_0"):
+            return lord
+    return lords[0] if lords else None
+
+
+def _aggregate_resources(buildings: list) -> dict[str, float]:
+    """Sum up all resources across building inventories."""
+    totals: dict[str, float] = {}
+    for bld in buildings:
+        for item in bld.get("Inventory_0", []):
+            if not isinstance(item, dict):
+                continue
+            type_id = item.get("Type_0", -1)
+            amount = item.get("amt_0", 0)
+            name = RESOURCE_TYPES.get(type_id, f"unknown_{type_id}")
+            totals[name] = totals.get(name, 0) + amount
+    return totals
+
+
+def _count_units(units: list) -> dict:
+    """Count units by role."""
+    roles = Counter()
+    for unit in units:
+        if unit.get("dead_0"):
+            continue
+        role = unit.get("currentUnitRole_0", "Unknown")
+        roles[role] += 1
+    return dict(roles)
+
+
+def _count_buildings(buildings: list) -> list[BuildingInfo]:
+    """Count buildings by type for the building list."""
+    type_counts = Counter()
+    type_workers = Counter()
+    for bld in buildings:
+        bt = bld.get("bType_0", -1)
+        name = BUILDING_TYPES.get(bt, f"building_{bt}")
+        if name == "road":
+            continue  # Skip roads
+        type_counts[name] += 1
+        type_workers[name] += bld.get("activeWorkers_0", 0)
+
+    return [
+        BuildingInfo(
+            type=name,
+            workers_assigned=type_workers[name],
+            level=1,
+        )
+        for name, count in type_counts.most_common()
+    ]
+
+
+def map_state(raw_json: dict) -> GameState:
+    """Map raw uesave JSON properties to a clean GameState object.
 
     Args:
-        raw_json: The raw property tree from SavConverter (list or dict).
-            If a list (SavConverter format), it's first converted to a nested dict
-            using properties_to_dict.
-        config: Mapper config dict. Loads default if None.
+        raw_json: The properties dict from parse_save() (uesave format).
 
     Returns:
         GameState with all discovered values populated.
     """
-    if config is None:
-        config = load_mapper_config()
-
-    # Convert SavConverter list format to nested dict for easy traversal
-    if isinstance(raw_json, list):
-        from src.parser.gvas_parser import properties_to_dict
-        raw_json = properties_to_dict(raw_json)
-
-    def get(section: str, field: str, default=None):
-        path = config.get(section, {}).get(field, "")
-        if not path:
-            return default
-        return get_nested_value(raw_json, path, default)
-
-    # Map season enum to string
-    season_raw = get("meta", "season", 0)
-    season_map = config.get("season_map", {})
-    if isinstance(season_raw, (int, float)):
-        season = season_map.get(int(season_raw), f"Unknown({season_raw})")
+    # Handle both full uesave output and pre-extracted properties
+    if "root" in raw_json:
+        props = raw_json["root"].get("properties", {})
+    elif "properties" in raw_json:
+        props = raw_json["properties"]
     else:
-        season = str(season_raw)
+        props = raw_json
 
-    # Build the GameState
+    # Meta
+    year = props.get("Year_0", 0)
+    day = props.get("day_0", 0)
+    season = _day_to_season(day)
+
     meta = MetaState(
-        year=int(get("meta", "year", 0) or 0),
+        year=year,
         season=season,
-        day=int(get("meta", "day", 0) or 0),
-        game_speed=str(get("meta", "game_speed", "unknown") or "unknown"),
+        day=day,
     )
+
+    # Find player region
+    regions = props.get("savedRegions_0", [])
+    player_region = _find_player_region(regions)
+
+    if player_region is None:
+        logger.warning("No player region found in save")
+        return GameState(meta=meta)
+
+    # Population
+    families = player_region.get("workerFamilies_0", [])
+    units = props.get("savedUnits_0", [])
+    unit_counts = _count_units(units)
 
     population = PopulationState(
-        families=int(get("settlement", "population_families", 0) or 0),
-        workers=int(get("settlement", "population_workers", 0) or 0),
-        homeless=int(get("settlement", "population_homeless", 0) or 0),
+        families=len(families),
+        workers=unit_counts.get("EUnitRole::Husband", 0),
+        homeless=0,  # TODO: detect from burgage vacancy
     )
+
+    # Settlement
+    lords = props.get("savedLords_0", [])
+    player_lord = _find_player_lord(lords)
 
     settlement = SettlementState(
-        name=str(get("settlement", "name", "Unknown") or "Unknown"),
-        approval=float(get("settlement", "approval", 0) or 0),
+        name=player_region.get("CustomName_0", "Unknown"),
+        approval=player_region.get("Approval_0", 0),
         population=population,
-        regional_wealth=float(get("settlement", "regional_wealth", 0) or 0),
-        lord_personal_wealth=float(get("settlement", "lord_personal_wealth", 0) or 0),
+        regional_wealth=player_region.get("regionalWealth_0", 0),
+        lord_personal_wealth=player_lord.get("treasury_0", 0) if player_lord else 0,
     )
 
+    # Resources — aggregate from all building inventories
+    buildings = props.get("savedBuildings_0", [])
+    resources = _aggregate_resources(buildings)
+
     food = FoodState(
-        total=float(get("resources", "food_total", 0) or 0),
-        bread=float(get("resources", "food_bread", 0) or 0),
-        berries=float(get("resources", "food_berries", 0) or 0),
-        meat=float(get("resources", "food_meat", 0) or 0),
-        vegetables=float(get("resources", "food_vegetables", 0) or 0),
-        eggs=float(get("resources", "food_eggs", 0) or 0),
-        fish=float(get("resources", "food_fish", 0) or 0),
+        total=sum(resources.get(k, 0) for k in [
+            "bread", "berries", "meat", "vegetables", "eggs", "fish",
+            "honey", "apples", "grain",
+        ]),
+        bread=resources.get("bread", 0),
+        berries=resources.get("berries", 0),
+        meat=resources.get("meat", 0),
+        vegetables=resources.get("vegetables", 0),
+        eggs=resources.get("eggs", 0),
+        fish=resources.get("fish", 0),
     )
 
     fuel = FuelState(
-        firewood=float(get("resources", "firewood", 0) or 0),
-        charcoal=float(get("resources", "charcoal", 0) or 0),
+        firewood=resources.get("firewood", 0),
+        charcoal=resources.get("charcoal", 0),
     )
 
     construction = ConstructionState(
-        timber=float(get("resources", "timber", 0) or 0),
-        planks=float(get("resources", "planks", 0) or 0),
-        stone=float(get("resources", "stone", 0) or 0),
-        clay=float(get("resources", "clay", 0) or 0),
+        timber=resources.get("timber", 0),
+        planks=resources.get("planks", 0),
+        stone=resources.get("stone", 0),
+        clay=resources.get("clay", 0),
     )
 
     clothing = ClothingState(
-        leather=float(get("resources", "leather", 0) or 0),
-        linen=float(get("resources", "linen", 0) or 0),
+        leather=resources.get("leather", 0),
+        linen=resources.get("linen", 0),
+        shoes=resources.get("shoes", 0),
+        cloaks=resources.get("cloaks", 0),
     )
 
     production = ProductionState(
-        iron=float(get("resources", "iron", 0) or 0),
-        ale=float(get("resources", "ale", 0) or 0),
-        malt=float(get("resources", "malt", 0) or 0),
-        flour=float(get("resources", "flour", 0) or 0),
-        yarn=float(get("resources", "yarn", 0) or 0),
+        iron=resources.get("iron_slabs", 0),
+        ale=resources.get("ale", 0),
+        malt=resources.get("malt", 0),
+        flour=resources.get("flour", 0),
+        yarn=resources.get("yarn", 0),
     )
 
-    resources = ResourceState(
+    resource_state = ResourceState(
         food=food,
         fuel=fuel,
         construction=construction,
@@ -161,26 +280,39 @@ def map_state(raw_json: list | dict, config: dict | None = None) -> GameState:
         production=production,
     )
 
-    military = MilitaryState(
-        retinue_count=int(get("military", "retinue_count", 0) or 0),
-        levies_mobilised=bool(get("military", "levies_mobilised", False)),
-        bandit_camps_nearby=int(get("military", "bandit_camps_nearby", 0) or 0),
+    # Buildings
+    building_list = _count_buildings(buildings)
+
+    # Military
+    squads = props.get("squads_0", [])
+    bandit_camps = sum(
+        1 for node in props.get("savedResourceNodes_0", [])
+        if node.get("nodeType_0") == "ENodeType::BanditCamp"
     )
 
-    dev_points = int(get("development_points", "", 0) or 0)
-    # Try top-level path directly for dev points
-    if dev_points == 0:
-        dp_path = config.get("development_points", "")
-        if isinstance(dp_path, str) and dp_path:
-            dp_val = get_nested_value(raw_json, dp_path, 0)
-            dev_points = int(dp_val or 0)
+    military = MilitaryState(
+        retinue_count=0,  # TODO: count from squads
+        levies_mobilised=False,
+        bandit_camps_nearby=bandit_camps,
+    )
 
-    return GameState(
+    # Development points
+    dev_points = player_region.get("devPoints_0", 0)
+
+    state = GameState(
         meta=meta,
         settlement=settlement,
-        resources=resources,
-        buildings=[],  # Buildings require array iteration — populated after path discovery
+        resources=resource_state,
+        buildings=building_list,
         military=military,
         development_points=dev_points,
-        alerts=[],  # Populated by alert engine
+        alerts=[],
     )
+
+    logger.info(
+        "Mapped state: Year %d %s, %d families, Approval %.0f, Food %.0f",
+        meta.year, meta.season, population.families,
+        settlement.approval, food.total,
+    )
+
+    return state

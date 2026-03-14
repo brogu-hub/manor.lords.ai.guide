@@ -28,6 +28,9 @@ class SaveFileHandler(FileSystemEventHandler):
         path = Path(event.src_path)
         if path.suffix.lower() != ".sav":
             return
+        # Skip descriptor and settings files — only process game saves
+        if "_descr" in path.stem or path.stem == "rtsSettings":
+            return
 
         now = time.time()
         if now - self._last_trigger < DEBOUNCE_SECONDS:
