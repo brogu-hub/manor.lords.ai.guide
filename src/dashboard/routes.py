@@ -89,6 +89,13 @@ async def get_history():
     return {"entries": _history}
 
 
+@router.get("/api/logs")
+async def get_logs(limit: int = 50):
+    """Return recent API request/response logs for debugging."""
+    from src.memory.request_log import get_recent_logs
+    return {"logs": get_recent_logs(limit)}
+
+
 # -- SSE Stream --
 
 @router.get("/api/stream")

@@ -11,6 +11,11 @@ from src.mapper.state_mapper import map_state
 from src.mapper.alert_engine import evaluate_alerts
 from src.strategy.gemini_client import generate_advice
 from src.memory.session_store import save_entry, get_session_context
+from src.memory.request_log import init_db
+from src.guides.steam_notes import (
+    update_guide_cache, get_patch_context,
+    update_workshop_guides, get_workshop_context,
+)
 from src.dashboard.routes import update_state, update_advice
 
 logger = logging.getLogger(__name__)
@@ -20,20 +25,45 @@ _guide_context: str = ""
 
 
 def load_guides():
-    """Load all guide markdown files into a single context string."""
+    """Load all guide markdown files and Steam patch notes into context."""
     global _guide_context
-    guides_dir = Path(__file__).parent.parent / "guides"
-    if not guides_dir.exists():
-        logger.info("No guides directory found, skipping guide context")
-        return
 
-    parts = ["REFERENCE MATERIAL — Manor Lords Strategy Guides:\n"]
-    for guide_file in sorted(guides_dir.glob("*.md")):
-        content = guide_file.read_text(encoding="utf-8")
-        parts.append(f"\n--- {guide_file.stem.replace('_', ' ').title()} ---\n{content}")
+    # Initialise request log DB
+    init_db()
+
+    # Load static guides
+    guides_dir = Path(__file__).parent.parent / "guides"
+    parts = []
+    md_count = 0
+    if guides_dir.exists():
+        parts.append("REFERENCE MATERIAL — Manor Lords Strategy Guides:\n")
+        for guide_file in sorted(guides_dir.glob("*.md")):
+            content = guide_file.read_text(encoding="utf-8")
+            parts.append(f"\n--- {guide_file.stem.replace('_', ' ').title()} ---\n{content}")
+            md_count += 1
+
+    # Fetch latest Steam patch notes
+    try:
+        new_count = update_guide_cache()
+        patch_context = get_patch_context()
+        if patch_context:
+            parts.append(patch_context)
+        logger.info("Patch notes: %d new fetched", new_count)
+    except Exception as e:
+        logger.warning("Failed to load patch notes: %s", e)
+
+    # Fetch Steam Workshop guides
+    try:
+        ws_count = update_workshop_guides()
+        ws_context = get_workshop_context()
+        if ws_context:
+            parts.append(ws_context)
+        logger.info("Workshop guides: %d new fetched", ws_count)
+    except Exception as e:
+        logger.warning("Failed to load Workshop guides: %s", e)
 
     _guide_context = "\n".join(parts)
-    logger.info("Loaded %d guide files (%d chars)", len(list(guides_dir.glob("*.md"))), len(_guide_context))
+    logger.info("Loaded %d guide files + patch notes (%d chars total)", md_count, len(_guide_context))
 
 
 async def process_save(save_path: str | Path):
