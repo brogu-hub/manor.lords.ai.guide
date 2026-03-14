@@ -1,0 +1,10 @@
+services:
+  advisor:
+    build: .
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8080"
+    env_file: .env
+    volumes:
+      - .:/app
+      - "${SAVE_FOLDER:-.}:/saves:ro"
+    restart: unless-stopped

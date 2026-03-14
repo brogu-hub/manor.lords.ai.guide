@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manor Lords AI Advisor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Manor Lords AI Advisor</h1>
+        <span id="status" class="status disconnected">Waiting for save...</span>
+    </header>
+
+    <main>
+        <section id="warnings" class="panel">
+            <h2>Warnings</h2>
+            <div class="panel-content">
+                <p class="placeholder">No warnings — settlement stable</p>
+            </div>
+        </section>
+
+        <section id="priorities" class="panel">
+            <h2>Top 3 Priorities</h2>
+            <div class="panel-content">
+                <p class="placeholder">Save your game to receive advice</p>
+            </div>
+        </section>
+
+        <section id="situation" class="panel">
+            <h2>Situation Summary</h2>
+            <div class="panel-content">
+                <p class="placeholder">Awaiting game state...</p>
+            </div>
+        </section>
+
+        <section id="next-season" class="panel">
+            <h2>Next Season Prep</h2>
+            <div class="panel-content">
+                <p class="placeholder">Awaiting game state...</p>
+            </div>
+        </section>
+
+        <section id="history" class="panel">
+            <h2>Session History</h2>
+            <div class="panel-content">
+                <p class="placeholder">No saves analysed yet</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <form id="ask-form">
+            <input type="text" id="ask-input" placeholder="Ask a follow-up question..." autocomplete="off">
+            <button type="submit">Ask</button>
+        </form>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

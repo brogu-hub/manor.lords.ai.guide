@@ -1,0 +1,81 @@
+# Alert rules for Manor Lords game state analysis
+#
+# Each rule checks a game state field against a threshold.
+# Format:
+#   - name: ALERT_NAME
+#     field: dotted.path.to.GameState.field
+#     operator: lt | gt | eq | lte | gte
+#     threshold: value
+#     message: Human-readable description
+#     severity: critical | warning | info
+
+rules:
+  - name: STARVATION_RISK
+    field: resources.food.total
+    operator: lt
+    threshold: 50
+    message: "CRITICAL: Food below 50. Starvation imminent."
+    severity: critical
+
+  - name: LOW_FOOD
+    field: resources.food.total
+    operator: lt
+    threshold: 150
+    message: "Food reserves low. Build food production or trade immediately."
+    severity: warning
+
+  - name: LOW_FIREWOOD
+    field: resources.fuel.firewood
+    operator: lt
+    threshold: 20
+    message: "Firewood dangerously low. Families will freeze."
+    severity: warning
+
+  - name: NO_FIREWOOD
+    field: resources.fuel.firewood
+    operator: lt
+    threshold: 5
+    message: "CRITICAL: Almost no firewood. Assign woodcutters immediately."
+    severity: critical
+
+  - name: LOW_APPROVAL
+    field: settlement.approval
+    operator: lt
+    threshold: 50
+    message: "Approval below 50%. Families may leave. Check needs."
+    severity: warning
+
+  - name: CRITICAL_APPROVAL
+    field: settlement.approval
+    operator: lt
+    threshold: 30
+    message: "CRITICAL: Approval collapsing. Settlement at risk of abandonment."
+    severity: critical
+
+  - name: LOW_STONE
+    field: resources.construction.stone
+    operator: lt
+    threshold: 5
+    message: "Stone nearly depleted. Cannot upgrade buildings."
+    severity: warning
+
+  - name: LOW_TIMBER
+    field: resources.construction.timber
+    operator: lt
+    threshold: 10
+    message: "Timber running low. Assign loggers or trade."
+    severity: warning
+
+  - name: NO_CLOTHING
+    field: resources.clothing.leather
+    operator: lt
+    threshold: 1
+    message: "No leather for clothing. Approval will drop when clothing need triggers."
+    severity: warning
+
+  - name: HOMELESS_FAMILIES
+    field: settlement.population.homeless
+    operator: gt
+    threshold: 0
+    message: "Homeless families detected. Build Burgages."
+    severity: warning

@@ -1,0 +1,30 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker
+.docker/
+
+# Data
+*.sav
+*.json
+!tests/fixtures/*.json
+!configs/*.yaml
+session_history.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Python
+*.egg-info/
+dist/
+build/
+.eggs/

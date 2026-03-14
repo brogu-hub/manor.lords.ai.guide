@@ -1,0 +1,150 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 24px;
+    background: #16213e;
+    border-bottom: 2px solid #0f3460;
+}
+
+header h1 {
+    font-size: 1.2rem;
+    color: #e94560;
+    font-weight: 600;
+}
+
+.status {
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 12px;
+}
+
+.status.disconnected {
+    background: #333;
+    color: #888;
+}
+
+.status.connected {
+    background: #0f3460;
+    color: #4ecca3;
+}
+
+main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr 1fr auto;
+    gap: 8px;
+    padding: 8px;
+    overflow-y: auto;
+}
+
+.panel {
+    background: #16213e;
+    border-radius: 8px;
+    border: 1px solid #0f3460;
+    overflow: hidden;
+}
+
+.panel h2 {
+    font-size: 0.85rem;
+    padding: 8px 12px;
+    background: #0f3460;
+    color: #e94560;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.panel-content {
+    padding: 12px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.placeholder {
+    color: #555;
+    font-style: italic;
+}
+
+#warnings {
+    grid-column: 1 / -1;
+}
+
+#history {
+    grid-column: 1 / -1;
+}
+
+.warning-item {
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    background: rgba(233, 69, 96, 0.15);
+    border-left: 3px solid #e94560;
+    border-radius: 4px;
+}
+
+.priority-item {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: rgba(15, 52, 96, 0.5);
+    border-left: 3px solid #4ecca3;
+    border-radius: 4px;
+}
+
+.priority-item strong {
+    color: #4ecca3;
+}
+
+footer {
+    padding: 8px 24px;
+    background: #16213e;
+    border-top: 2px solid #0f3460;
+}
+
+#ask-form {
+    display: flex;
+    gap: 8px;
+}
+
+#ask-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+}
+
+#ask-input:focus {
+    outline: none;
+    border-color: #4ecca3;
+}
+
+#ask-form button {
+    padding: 8px 20px;
+    background: #e94560;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+#ask-form button:hover {
+    background: #c73e54;
+}
