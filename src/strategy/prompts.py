@@ -27,6 +27,7 @@ def build_user_prompt(
     state: GameState,
     session_context: str = "",
     guide_context: str = "",
+    correction_context: str = "",
     config: dict | None = None,
 ) -> str:
     """Build the user prompt with game state and context injected."""
@@ -37,8 +38,13 @@ def build_user_prompt(
 
     state_json = json.dumps(state.model_dump(), indent=2, ensure_ascii=False)
 
-    return template.format(
+    prompt = template.format(
         game_state_json=state_json,
         session_context=session_context or "No previous session data available.",
         guide_context=guide_context or "",
     )
+
+    if correction_context:
+        prompt += correction_context
+
+    return prompt

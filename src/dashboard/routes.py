@@ -96,6 +96,76 @@ async def get_logs(limit: int = 50):
     return {"logs": get_recent_logs(limit)}
 
 
+@router.get("/api/saves")
+async def list_saves():
+    """List available .sav files in the save folder."""
+    from src.config import SAVE_FOLDER
+    saves = []
+    save_dir = Path(SAVE_FOLDER)
+    if save_dir.exists():
+        for f in sorted(save_dir.glob("*.sav"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if f.name == "rtsSettings.sav" or f.name.endswith("_descr.sav"):
+                continue
+            saves.append({
+                "name": f.name,
+                "modified": f.stat().st_mtime,
+                "size": f.stat().st_size,
+            })
+    return {"saves": saves}
+
+
+_processing = False
+
+
+@router.post("/api/process")
+async def process_latest(save_name: str | None = None):
+    """Trigger the pipeline on the latest (or specified) save file.
+
+    Returns immediately and runs the pipeline in the background.
+    Results are pushed to the dashboard via SSE.
+    """
+    global _processing
+    if _processing:
+        return {"status": "busy", "message": "Pipeline already running"}
+
+    from src.config import SAVE_FOLDER
+    save_dir = Path(SAVE_FOLDER)
+
+    if save_name:
+        save_path = save_dir / save_name
+    else:
+        sav_files = [
+            f for f in save_dir.glob("*.sav")
+            if f.name != "rtsSettings.sav" and not f.name.endswith("_descr.sav")
+        ]
+        if not sav_files:
+            return {"status": "error", "message": "No save files found"}
+        save_path = max(sav_files, key=lambda p: p.stat().st_mtime)
+
+    if not save_path.exists():
+        return {"status": "error", "message": f"Save file not found: {save_path.name}"}
+
+    broadcast_event("processing", {"save": save_path.name})
+    _processing = True
+    asyncio.create_task(_run_pipeline(save_path))
+    return {"status": "ok", "save": save_path.name, "message": "Pipeline started"}
+
+
+async def _run_pipeline(save_path: Path):
+    """Run the pipeline in the background, broadcasting results via SSE."""
+    global _processing
+    try:
+        from src.pipeline import process_save, load_guides, _guide_context
+        if not _guide_context:
+            load_guides()
+        await process_save(save_path)
+    except Exception as e:
+        logger.error("Background pipeline failed: %s", e)
+        broadcast_event("error", {"message": str(e)})
+    finally:
+        _processing = False
+
+
 # -- SSE Stream --
 
 @router.get("/api/stream")

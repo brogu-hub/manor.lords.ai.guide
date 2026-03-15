@@ -3,12 +3,12 @@
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
+
+from src.config import DATA_DIR, SESSION_MAX_ENTRIES
 
 logger = logging.getLogger(__name__)
 
-STORE_PATH = Path(__file__).parent.parent.parent / "data" / "session_history.json"
-MAX_ENTRIES = 10
+STORE_PATH = DATA_DIR / "session_history.json"
 
 
 def _ensure_store():
@@ -41,8 +41,8 @@ def save_entry(state_summary: dict, advice_summary: str):
     history.append(entry)
 
     # Keep only last N entries
-    if len(history) > MAX_ENTRIES:
-        history = history[-MAX_ENTRIES:]
+    if len(history) > SESSION_MAX_ENTRIES:
+        history = history[-SESSION_MAX_ENTRIES:]
 
     STORE_PATH.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info("Session entry saved (%d total)", len(history))

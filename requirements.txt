@@ -5,4 +5,5 @@ pydantic==2.11.2
 pyyaml==6.0.2
 watchdog==6.0.0
 google-genai==1.14.0
+deepeval>=2.0
 SavConverter==0.1.1

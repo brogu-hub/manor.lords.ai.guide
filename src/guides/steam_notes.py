@@ -6,18 +6,13 @@ import logging
 import re
 import urllib.request
 from datetime import datetime
-from pathlib import Path
+
+from src.config import STEAM_APP_ID, WORKSHOP_GUIDE_IDS, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-STEAM_APP_ID = 1363080
-STORE_PATH = Path(__file__).parent.parent.parent / "data" / "patch_notes.json"
-WORKSHOP_STORE_PATH = Path(__file__).parent.parent.parent / "data" / "workshop_guides.json"
-
-# Workshop guide IDs to fetch (add more here)
-WORKSHOP_GUIDE_IDS = [
-    "3427105626",
-]
+STORE_PATH = DATA_DIR / "patch_notes.json"
+WORKSHOP_STORE_PATH = DATA_DIR / "workshop_guides.json"
 
 
 def _strip_html(text: str) -> str:
