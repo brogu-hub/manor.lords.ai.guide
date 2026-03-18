@@ -31,5 +31,9 @@ RUN tar xJf /tmp/uesave.tar.xz -C /tmp/ && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Source code is bind-mounted at runtime, not copied
-CMD ["uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "7861", "--reload"]
+# Copy application source
+COPY src/ ./src/
+COPY configs/ ./configs/
+COPY guides/ ./guides/
+
+CMD ["uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "7861"]

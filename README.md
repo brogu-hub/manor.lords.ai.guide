@@ -78,7 +78,17 @@ ENABLE_GAME_DETECTION=true
 docker compose up -d --build
 ```
 
-Open **http://localhost:7860** -- the dashboard auto-opens when Manor Lords launches.
+Open **http://localhost:7860** -- the dashboard updates in real-time when you save your game.
+
+### Game Detection (Windows, Optional)
+
+Auto-opens the dashboard in your browser when Manor Lords launches via Steam. Zero CPU -- uses kernel-level registry notifications.
+
+```powershell
+.\setup-game-detector.ps1
+```
+
+Runs once, starts on every login. To remove: delete `ManorLordsDetector` from `shell:startup`.
 
 ### Local Development
 

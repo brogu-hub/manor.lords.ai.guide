@@ -3,11 +3,12 @@ services:
     build: .
     expose:
       - "7861"
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       - ENABLE_GAME_DETECTION=false
     volumes:
-      - .:/app
       - "${SAVE_FOLDER:-.}:/saves:ro"
     restart: unless-stopped
 

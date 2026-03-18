@@ -28,6 +28,9 @@ session_history.json
 # Binaries
 uesave.tar.xz
 
+# Logs
+game_detector.log
+
 # OS
 Thumbs.db
 .DS_Store
