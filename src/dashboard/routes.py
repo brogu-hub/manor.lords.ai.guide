@@ -3,10 +3,10 @@
 import asyncio
 import json
 import logging
+import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request, UploadFile, File
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -53,14 +53,6 @@ def update_advice(advice: AdviceResponse, state_summary: str = ""):
     # Keep last 10
     while len(_history) > 10:
         _history.pop(0)
-
-
-# -- HTML --
-
-@router.get("/", response_class=HTMLResponse)
-async def index():
-    html_path = Path(__file__).parent.parent.parent / "static" / "index.html"
-    return html_path.read_text(encoding="utf-8")
 
 
 # -- REST API --
@@ -164,6 +156,26 @@ async def _run_pipeline(save_path: Path):
         broadcast_event("error", {"message": str(e)})
     finally:
         _processing = False
+
+
+@router.post("/api/upload")
+async def upload_save(file: UploadFile = File(...)):
+    """Accept a .sav file upload and run the pipeline on it."""
+    global _processing
+    if _processing:
+        return {"status": "busy", "message": "Pipeline already running"}
+
+    if not file.filename or not file.filename.endswith(".sav"):
+        return {"status": "error", "message": "Only .sav files are accepted"}
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_path = tmp_dir / file.filename
+    tmp_path.write_bytes(await file.read())
+
+    broadcast_event("processing", {"save": file.filename})
+    _processing = True
+    asyncio.create_task(_run_pipeline(tmp_path))
+    return {"status": "ok", "save": file.filename, "message": "Pipeline started"}
 
 
 # -- SSE Stream --

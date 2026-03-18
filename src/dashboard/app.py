@@ -1,12 +1,13 @@
 import asyncio
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
-from src.config import SAVE_FOLDER
+from src.config import CORS_ORIGINS, ENABLE_GAME_DETECTION, SAVE_FOLDER
 from src.dashboard.routes import router
 from src.pipeline import load_guides, process_save
 from src.watcher.save_watcher import start_watcher
@@ -35,6 +36,15 @@ async def lifespan(app: FastAPI):
         logger.warning("Save folder not found: %s — watcher not started", SAVE_FOLDER)
         logger.warning("Set SAVE_FOLDER in .env to your Manor Lords save path")
 
+    # Start game detector (Windows only, local only)
+    if sys.platform == "win32" and ENABLE_GAME_DETECTION:
+        try:
+            from src.watcher.game_detector import start_game_detector
+
+            start_game_detector("http://localhost:7860")
+        except Exception as e:
+            logger.warning("Game detector failed to start: %s", e)
+
     yield
 
     # Cleanup
@@ -46,7 +56,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Manor Lords AI Advisor", lifespan=lifespan)
 
-app.include_router(router)
+# CORS for local dev (Remix on :7860, Python API on :7861)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS.split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-static_dir = Path(__file__).parent.parent.parent / "static"
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+app.include_router(router)

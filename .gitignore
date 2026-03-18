@@ -14,9 +14,15 @@ __pycache__/
 
 # Data
 *.sav
+data/
+.deepeval/
 *.json
 !tests/fixtures/*.json
 !configs/*.yaml
+!web/package.json
+!web/package-lock.json
+!web/tsconfig.json
+!web/components.json
 session_history.json
 
 # Binaries
@@ -31,3 +37,8 @@ Thumbs.db
 dist/
 build/
 .eggs/
+
+# Node
+node_modules/
+web/build/
+web/.react-router/

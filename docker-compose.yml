@@ -1,10 +1,23 @@
 services:
-  advisor:
+  python-api:
     build: .
-    ports:
-      - "${DASHBOARD_PORT:-8080}:8080"
+    expose:
+      - "7861"
     env_file: .env
+    environment:
+      - ENABLE_GAME_DETECTION=false
     volumes:
       - .:/app
       - "${SAVE_FOLDER:-.}:/saves:ro"
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "${WEB_PORT:-7860}:7860"
+    environment:
+      - API_BASE_URL=http://python-api:7861
+      - PORT=7860
+    depends_on:
+      - python-api
     restart: unless-stopped

@@ -32,4 +32,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Source code is bind-mounted at runtime, not copied
-CMD ["uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+CMD ["uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "7861", "--reload"]

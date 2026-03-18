@@ -28,7 +28,9 @@ GUIDES_DIR = Path(__file__).parent.parent / "guides"
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 # Dashboard
-DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "7861"))
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:7860")
+ENABLE_GAME_DETECTION = os.getenv("ENABLE_GAME_DETECTION", "true").lower() == "true"
 
 # Session
 SESSION_MAX_ENTRIES = int(os.getenv("SESSION_MAX_ENTRIES", "10"))

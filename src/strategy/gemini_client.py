@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 
 from google import genai
 from google.genai import types
@@ -20,6 +21,16 @@ from src.strategy.prompts import build_system_prompt, build_user_prompt
 from src.strategy.response_parser import AdviceResponse, parse_advice
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AdviceResult:
+    """Advice response with evaluation metadata."""
+    advice: AdviceResponse
+    eval_passed: bool | None = None
+    eval_scores: dict[str, float] | None = None
+    eval_reasons: dict[str, str] | None = None
+    attempt: int = 1
 
 _client: genai.Client | None = None
 _resolved_chain: list[str] | None = None
@@ -178,8 +189,13 @@ async def generate_advice(
     state: GameState,
     session_context: str = "",
     guide_context: str = "",
-) -> AdviceResponse:
-    """Generate strategic advice with eval-based self-healing.
+    on_chunk=None,
+) -> AdviceResult:
+    """Generate strategic advice with eval-based self-healing and optional streaming.
+
+    Args:
+        on_chunk: Optional callback (text, is_thinking, attempt) called for each
+                  streaming chunk. When provided, uses async streaming API.
 
     Flow: generate → parse → structural check → DeepEval → retry if needed.
     Max attempts = 1 + MAX_EVAL_RETRIES.
@@ -226,16 +242,45 @@ async def generate_advice(
             t0 = time.time()
             try:
                 logger.info(
-                    "Calling %s (attempt=%d, thinking_budget=%d, cached=%s)",
-                    model_id, attempt, thinking_budget, bool(cache_name),
+                    "Calling %s (attempt=%d, thinking_budget=%d, cached=%s, streaming=%s)",
+                    model_id, attempt, thinking_budget, bool(cache_name), bool(on_chunk),
                 )
-                response = client.models.generate_content(
-                    model=model_id,
-                    contents=user_prompt,
-                    config=gen_config,
-                )
+
+                if on_chunk:
+                    # Async streaming — yields to event loop between chunks
+                    response_text = ""
+                    async for chunk in await client.aio.models.generate_content_stream(
+                        model=model_id,
+                        contents=user_prompt,
+                        config=gen_config,
+                    ):
+                        try:
+                            if (chunk.candidates and chunk.candidates[0].content
+                                    and chunk.candidates[0].content.parts):
+                                for part in chunk.candidates[0].content.parts:
+                                    part_text = getattr(part, 'text', '') or ''
+                                    is_thinking = getattr(part, 'thought', False)
+                                    if part_text:
+                                        on_chunk(part_text, is_thinking, attempt)
+                                        if not is_thinking:
+                                            response_text += part_text
+                            elif chunk.text:
+                                on_chunk(chunk.text, False, attempt)
+                                response_text += chunk.text
+                        except (IndexError, AttributeError):
+                            t = chunk.text
+                            if t:
+                                on_chunk(t, False, attempt)
+                                response_text += t
+                else:
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=user_prompt,
+                        config=gen_config,
+                    )
+                    response_text = response.text or ""
+
                 duration_ms = int((time.time() - t0) * 1000)
-                response_text = response.text or ""
                 logger.info("Response from %s: %d chars in %dms", model_id, len(response_text), duration_ms)
 
                 advice = parse_advice(response_text)
@@ -274,7 +319,13 @@ async def generate_advice(
                 )
 
                 if eval_result is None or eval_result.passed:
-                    return advice
+                    return AdviceResult(
+                        advice=advice,
+                        eval_passed=eval_result.passed if eval_result else None,
+                        eval_scores=eval_result.scores if eval_result else None,
+                        eval_reasons=eval_result.reasons if eval_result else None,
+                        attempt=attempt,
+                    )
 
                 # Eval failed — set correction for retry
                 logger.warning(
@@ -314,7 +365,7 @@ async def generate_advice(
 
     # Return best attempt (last successful parse)
     if best_advice:
-        return best_advice
+        return AdviceResult(advice=best_advice, attempt=attempt)
     raise RuntimeError("Failed to generate advice after all attempts")
 
 

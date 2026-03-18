@@ -16,7 +16,7 @@ from src.guides.steam_notes import (
     update_guide_cache, get_patch_context,
     update_workshop_guides, get_workshop_context,
 )
-from src.dashboard.routes import update_state, update_advice
+from src.dashboard.routes import update_state, update_advice, broadcast_event
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +105,30 @@ async def process_save(save_path: str | Path):
     # Step 5: Get session context
     session_context = get_session_context()
 
-    # Step 6: Generate advice via Gemini
+    # Step 6: Generate advice via Gemini (streaming)
     try:
-        advice = await generate_advice(state, session_context, _guide_context)
+        def on_chunk(text, is_thinking=False, attempt=1):
+            event_type = "thinking_chunk" if is_thinking else "advice_chunk"
+            broadcast_event(event_type, {"text": text, "attempt": attempt})
+
+        broadcast_event("streaming_start", {})
+        result = await generate_advice(
+            state, session_context, _guide_context, on_chunk=on_chunk,
+        )
+        advice = result.advice
+        broadcast_event("streaming_end", {})
+
+        # Broadcast eval results
+        if result.eval_scores is not None:
+            broadcast_event("eval_result", {
+                "passed": result.eval_passed,
+                "scores": result.eval_scores,
+                "reasons": result.eval_reasons or {},
+                "attempt": result.attempt,
+            })
     except Exception as e:
         logger.error("Failed to generate advice: %s", e)
+        broadcast_event("streaming_end", {})
         return
 
     # Step 7: Broadcast advice to dashboard
