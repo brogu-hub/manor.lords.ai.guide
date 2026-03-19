@@ -1,6 +1,10 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 PRIMARY_MODEL = os.getenv("PRIMARY_MODEL", "auto")
@@ -21,8 +25,8 @@ WORKSHOP_GUIDE_IDS = [
     if gid.strip()
 ]
 
-# Paths — inside Docker, saves are always mounted at /saves
-SAVE_FOLDER = Path(os.getenv("WATCH_PATH", "/saves"))
+# Paths — WATCH_PATH (set by Docker env) takes priority, then SAVE_FOLDER (.env), then /saves
+SAVE_FOLDER = Path(os.getenv("WATCH_PATH", os.getenv("SAVE_FOLDER", "/saves")))
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 GUIDES_DIR = Path(__file__).parent.parent / "guides"
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -33,7 +37,8 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:7860")
 ENABLE_GAME_DETECTION = os.getenv("ENABLE_GAME_DETECTION", "true").lower() == "true"
 
 # Session
-SESSION_MAX_ENTRIES = int(os.getenv("SESSION_MAX_ENTRIES", "10"))
+SESSION_MAX_ENTRIES = int(os.getenv("SESSION_MAX_ENTRIES", "100"))
+HISTORY_MAX_ENTRIES = int(os.getenv("HISTORY_MAX_ENTRIES", "100"))
 
 # Watcher
 DEBOUNCE_SECONDS = float(os.getenv("DEBOUNCE_SECONDS", "2.0"))

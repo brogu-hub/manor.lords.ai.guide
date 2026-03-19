@@ -1,15 +1,17 @@
 services:
   python-api:
     build: .
-    expose:
-      - "7861"
+    ports:
+      - "${DASHBOARD_PORT:-7861}:7861"
     env_file:
       - path: .env
         required: false
     environment:
+      - WATCH_PATH=/saves
       - ENABLE_GAME_DETECTION=false
     volumes:
       - "${SAVE_FOLDER:-.}:/saves:ro"
+      - api-data:/app/data
     restart: unless-stopped
 
   web:
@@ -22,3 +24,6 @@ services:
     depends_on:
       - python-api
     restart: unless-stopped
+
+volumes:
+  api-data:

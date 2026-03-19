@@ -1,8 +1,10 @@
 """Pipeline orchestrator — ties all components together.
 
-Flow: parse save → map state → evaluate alerts → load context → generate advice → broadcast
+Flow: parse save → map state → evaluate alerts → load context → generate advice →
+      broadcast → label trajectory → embed state
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -16,7 +18,10 @@ from src.guides.steam_notes import (
     update_guide_cache, get_patch_context,
     update_workshop_guides, get_workshop_context,
 )
-from src.dashboard.routes import update_state, update_advice, broadcast_event
+from src.dashboard.routes import (
+    update_state, update_advice, broadcast_event,
+    update_trajectory, get_last_history_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +138,47 @@ async def process_save(save_path: str | Path):
 
     # Step 7: Broadcast advice to dashboard
     state_summary = f"Year {state.meta.year} {state.meta.season}"
-    update_advice(advice, state_summary)
+    update_advice(advice, state_summary, save_name=save_path.name)
 
-    # Step 8: Save to session history
+    # Step 8: Label trajectory + embed state (concurrent, non-blocking)
+    history_id = get_last_history_id()
+    if history_id:
+        try:
+            from src.analysis.trajectory_labeler import label_trajectory
+            from src.analysis.state_embedder import embed_state
+
+            label_result, embedding = await asyncio.gather(
+                label_trajectory(state, advice),
+                embed_state(state),
+                return_exceptions=True,
+            )
+
+            if isinstance(label_result, Exception):
+                logger.warning("Trajectory labeling failed: %s", label_result)
+                label_result = None
+            if isinstance(embedding, Exception):
+                logger.warning("State embedding failed: %s", embedding)
+                embedding = None
+
+            if label_result:
+                update_trajectory(
+                    entry_id=history_id,
+                    label=label_result.label,
+                    score=label_result.score,
+                    reasoning=label_result.reasoning,
+                    strengths=label_result.key_strengths,
+                    risks=label_result.key_risks,
+                    embedding=embedding,
+                )
+                logger.info(
+                    "Trajectory: %s (score=%d) | Embedded: %s",
+                    label_result.label, label_result.score,
+                    "yes" if embedding else "no",
+                )
+        except Exception as e:
+            logger.warning("Analysis step failed: %s", e)
+
+    # Step 9: Save to session history
     save_entry(
         state_summary={
             "year": state.meta.year,

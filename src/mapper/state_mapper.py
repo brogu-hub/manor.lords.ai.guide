@@ -11,6 +11,8 @@ Manor Lords save structure (uesave format):
 import logging
 from collections import Counter
 
+import math
+
 from src.mapper.schemas import (
     BuildingInfo,
     ClothingState,
@@ -22,6 +24,8 @@ from src.mapper.schemas import (
     MilitaryState,
     PopulationState,
     ProductionState,
+    RealmMap,
+    ResourceNode,
     ResourceState,
     SettlementState,
 )
@@ -169,6 +173,104 @@ def _count_buildings(buildings: list) -> list[BuildingInfo]:
     ]
 
 
+# Resource node type → medieval name
+NODE_TYPES = {
+    "ENodeType::Iron": "iron deposit",
+    "ENodeType::Stone": "stone quarry",
+    "ENodeType::Clay": "clay pit",
+    "ENodeType::Berries": "berry thicket",
+    "ENodeType::SmallGame": "hunting grounds",
+    "ENodeType::Fish": "fishing waters",
+    "ENodeType::Eel": "eel pond",
+    "ENodeType::Salt": "salt spring",
+    "ENodeType::Mushrooms": "mushroom grove",
+    "ENodeType::BanditCamp": "bandit camp",
+}
+
+
+def _compass_direction(dx: float, dy: float) -> str:
+    """Convert delta x/y to a compass direction (medieval style)."""
+    angle = math.degrees(math.atan2(dy, dx))
+    # UE5 coordinate system: X = east, Y = north (approximately)
+    if -22.5 <= angle < 22.5:
+        return "east"
+    elif 22.5 <= angle < 67.5:
+        return "north-east"
+    elif 67.5 <= angle < 112.5:
+        return "north"
+    elif 112.5 <= angle < 157.5:
+        return "north-west"
+    elif angle >= 157.5 or angle < -157.5:
+        return "west"
+    elif -157.5 <= angle < -112.5:
+        return "south-west"
+    elif -112.5 <= angle < -67.5:
+        return "south"
+    else:
+        return "south-east"
+
+
+def _distance_label(dist: float) -> str:
+    """Convert raw distance to a medieval-style proximity label."""
+    if dist < 5000:
+        return "nearby"
+    elif dist < 15000:
+        return "a short ride"
+    elif dist < 30000:
+        return "a fair distance"
+    else:
+        return "far afield"
+
+
+def _map_resource_nodes(nodes: list, center_x: float, center_y: float) -> list[ResourceNode]:
+    """Extract resource nodes with compass directions relative to settlement center."""
+    result = []
+    for node in nodes:
+        node_type = node.get("nodeType_0", "")
+        name = NODE_TYPES.get(node_type)
+        if not name:
+            continue
+
+        loc = node.get("Location_0", {})
+        nx = loc.get("x", 0) if isinstance(loc, dict) else 0
+        ny = loc.get("y", 0) if isinstance(loc, dict) else 0
+
+        dx = nx - center_x
+        dy = ny - center_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        result.append(ResourceNode(
+            type=name,
+            rich=bool(node.get("bRichNode_0")),
+            direction=_compass_direction(dx, dy),
+            distance=_distance_label(dist),
+        ))
+    return result
+
+
+def _build_map_summary(nodes: list[ResourceNode], region_count: int, settled: int) -> str:
+    """Build a prose summary of the realm's geography for Gerald."""
+    if not nodes:
+        return "The land's bounty remains unsurveyed."
+
+    # Group by type
+    by_type: dict[str, list[ResourceNode]] = {}
+    for n in nodes:
+        by_type.setdefault(n.type, []).append(n)
+
+    parts = [f"The realm spans {region_count} territories, {settled} settled."]
+    for ntype, group in sorted(by_type.items()):
+        rich = [n for n in group if n.rich]
+        dirs = list({n.direction for n in group})
+        if rich:
+            parts.append(f"Rich {ntype} lies to the {dirs[0]}.")
+        else:
+            dir_str = " and ".join(dirs[:2])
+            parts.append(f"{ntype.title()} found to the {dir_str} ({group[0].distance}).")
+
+    return " ".join(parts)
+
+
 def map_state(raw_json: dict) -> GameState:
     """Map raw uesave JSON properties to a clean GameState object.
 
@@ -299,12 +401,29 @@ def map_state(raw_json: dict) -> GameState:
     # Development points
     dev_points = player_region.get("devPoints_0", 0)
 
+    # Realm map — resource nodes with compass directions
+    center = player_region.get("Center_0", {})
+    center_x = center.get("x", 0) if isinstance(center, dict) else 0
+    center_y = center.get("y", 0) if isinstance(center, dict) else 0
+
+    raw_nodes = props.get("savedResourceNodes_0", [])
+    resource_nodes = _map_resource_nodes(raw_nodes, center_x, center_y)
+    settled_count = sum(1 for r in regions if r.get("isSettled_0"))
+
+    realm_map = RealmMap(
+        resource_nodes=resource_nodes,
+        region_count=len(regions),
+        settled_regions=settled_count,
+        summary=_build_map_summary(resource_nodes, len(regions), settled_count),
+    )
+
     state = GameState(
         meta=meta,
         settlement=settlement,
         resources=resource_state,
         buildings=building_list,
         military=military,
+        realm_map=realm_map,
         development_points=dev_points,
         alerts=[],
     )

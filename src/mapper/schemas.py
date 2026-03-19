@@ -74,6 +74,24 @@ class BuildingInfo(BaseModel):
     workers_assigned: int = 0
     max_workers: int = 0
     level: int = 1
+    direction: str = ""  # compass direction from settlement center (e.g. "north-east")
+    distance: str = ""   # "near", "mid", "far"
+
+
+class ResourceNode(BaseModel):
+    """A natural resource deposit or gathering site on the realm's map."""
+    type: str = ""       # e.g. "iron", "berries", "stone", "clay", "fish"
+    rich: bool = False   # bountiful deposit
+    direction: str = ""  # compass from settlement center
+    distance: str = ""   # "near", "mid", "far"
+
+
+class RealmMap(BaseModel):
+    """Spatial overview of the lord's territory."""
+    resource_nodes: list[ResourceNode] = []
+    region_count: int = 0
+    settled_regions: int = 0
+    summary: str = ""    # human-readable spatial summary for Gerald
 
 
 class MilitaryState(BaseModel):
@@ -91,5 +109,6 @@ class GameState(BaseModel):
     resources: ResourceState = ResourceState()
     buildings: list[BuildingInfo] = []
     military: MilitaryState = MilitaryState()
+    realm_map: RealmMap = RealmMap()
     development_points: int = 0
     alerts: list[str] = []

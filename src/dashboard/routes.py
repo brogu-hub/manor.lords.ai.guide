@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -11,16 +12,117 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from src.strategy.response_parser import AdviceResponse
+from src.config import DATA_DIR, HISTORY_MAX_ENTRIES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# --- SQLite persistence ---
+_DB_PATH = DATA_DIR / "dashboard.db"
+_db: sqlite3.Connection | None = None
+
+
+def _get_db() -> sqlite3.Connection:
+    global _db
+    if _db is None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _db = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+        _db.execute("""
+            CREATE TABLE IF NOT EXISTS cache (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        _db.execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp  TEXT NOT NULL,
+                save_name  TEXT,
+                summary    TEXT,
+                priority_1 TEXT,
+                state_json TEXT,
+                advice_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        # Migrate: add columns if upgrading from old schema
+        for col, col_type in [
+            ("save_name", "TEXT"),
+            ("state_json", "TEXT"),
+            ("advice_json", "TEXT"),
+            ("trajectory_label", "TEXT"),
+            ("trajectory_score", "REAL"),
+            ("trajectory_reasoning", "TEXT"),
+            ("trajectory_strengths", "TEXT"),
+            ("trajectory_risks", "TEXT"),
+            ("embedding", "TEXT"),
+        ]:
+            try:
+                _db.execute(f"ALTER TABLE history ADD COLUMN {col} {col_type}")
+            except sqlite3.OperationalError:
+                pass
+        _db.commit()
+        logger.info("Dashboard DB initialised at %s", _DB_PATH)
+    return _db
+
+
+def _db_set(key: str, value: str):
+    db = _get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO cache (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+        (key, value),
+    )
+    db.commit()
+
+
+def _db_get(key: str) -> str | None:
+    db = _get_db()
+    row = db.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
 
 # In-memory state shared with the pipeline
 _current_state: dict | None = None
 _current_advice: AdviceResponse | None = None
 _history: list[dict] = []
 _sse_subscribers: list[asyncio.Queue] = []
+
+
+def _load_cached():
+    """Load persisted state/advice from database on startup."""
+    global _current_state, _current_advice, _history
+    try:
+        raw = _db_get("state")
+        if raw:
+            _current_state = json.loads(raw)
+            logger.info("Loaded cached game state from DB")
+    except Exception as e:
+        logger.warning("Failed to load cached state: %s", e)
+    try:
+        raw = _db_get("advice")
+        if raw:
+            _current_advice = AdviceResponse(**json.loads(raw))
+            logger.info("Loaded cached advice from DB")
+    except Exception as e:
+        logger.warning("Failed to load cached advice: %s", e)
+    try:
+        db = _get_db()
+        rows = db.execute(
+            "SELECT id, timestamp, save_name, summary, priority_1 FROM history ORDER BY id DESC LIMIT ?",
+            (HISTORY_MAX_ENTRIES,)
+        ).fetchall()
+        _history = [
+            {"id": r[0], "timestamp": r[1], "save_name": r[2], "summary": r[3], "priority_1": r[4]}
+            for r in reversed(rows)
+        ]
+    except Exception as e:
+        logger.warning("Failed to load history: %s", e)
+
+
+# Load on import
+_load_cached()
 
 
 def broadcast_event(event_type: str, data: dict):
@@ -34,25 +136,73 @@ def update_state(state_dict: dict):
     global _current_state
     _current_state = state_dict
     broadcast_event("state", state_dict)
+    try:
+        _db_set("state", json.dumps(state_dict))
+    except Exception as e:
+        logger.warning("Failed to persist state: %s", e)
 
 
-def update_advice(advice: AdviceResponse, state_summary: str = ""):
+def update_advice(advice: AdviceResponse, state_summary: str = "", save_name: str = ""):
     """Called by the pipeline when new advice is generated."""
     global _current_advice
     _current_advice = advice
     advice_dict = advice.model_dump(exclude={"raw_text"})
     broadcast_event("advice", advice_dict)
+    try:
+        _db_set("advice", json.dumps(advice_dict))
+    except Exception as e:
+        logger.warning("Failed to persist advice: %s", e)
 
-    # Add to history
-    from datetime import datetime
-    _history.append({
-        "timestamp": datetime.now().strftime("%H:%M:%S"),
-        "summary": state_summary or advice.situation[:80] if advice.situation else "State updated",
+    # Add to history with full state + advice snapshot (ISO format for client-side local time)
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).isoformat()
+    summary = state_summary or advice.situation[:80] if advice.situation else "State updated"
+    entry = {
+        "timestamp": ts,
+        "save_name": save_name,
+        "summary": summary,
         "priority_1": advice.priority_1,
-    })
-    # Keep last 10
-    while len(_history) > 10:
+    }
+    try:
+        db = _get_db()
+        cur = db.execute(
+            "INSERT INTO history (timestamp, save_name, summary, priority_1, state_json, advice_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, save_name, summary, advice.priority_1,
+             json.dumps(_current_state) if _current_state else None,
+             json.dumps(advice_dict)),
+        )
+        entry["id"] = cur.lastrowid
+        db.execute("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT ?)", (HISTORY_MAX_ENTRIES,))
+        db.commit()
+    except Exception as e:
+        logger.warning("Failed to persist history: %s", e)
+    _history.append(entry)
+    while len(_history) > HISTORY_MAX_ENTRIES:
         _history.pop(0)
+
+
+def update_trajectory(entry_id: int, label: str, score: float, reasoning: str,
+                      strengths: list[str], risks: list[str], embedding: list[float] | None = None):
+    """Update a history entry with trajectory analysis and embedding."""
+    try:
+        db = _get_db()
+        db.execute(
+            """UPDATE history SET trajectory_label=?, trajectory_score=?, trajectory_reasoning=?,
+               trajectory_strengths=?, trajectory_risks=?, embedding=? WHERE id=?""",
+            (label, score, reasoning,
+             json.dumps(strengths), json.dumps(risks),
+             json.dumps(embedding) if embedding else None, entry_id),
+        )
+        db.commit()
+    except Exception as e:
+        logger.warning("Failed to update trajectory: %s", e)
+
+
+def get_last_history_id() -> int | None:
+    """Return the ID of the most recent history entry."""
+    db = _get_db()
+    row = db.execute("SELECT id FROM history ORDER BY id DESC LIMIT 1").fetchone()
+    return row[0] if row else None
 
 
 # -- REST API --
@@ -79,6 +229,134 @@ async def get_advice():
 @router.get("/api/history")
 async def get_history():
     return {"entries": _history}
+
+
+@router.get("/api/history/{entry_id}")
+async def get_history_entry(entry_id: int):
+    """Retrieve full state + advice snapshot for a history entry."""
+    db = _get_db()
+    row = db.execute(
+        "SELECT id, timestamp, save_name, summary, priority_1, state_json, advice_json FROM history WHERE id = ?",
+        (entry_id,),
+    ).fetchone()
+    if not row:
+        return {"status": "error", "message": "Entry not found"}
+    return {
+        "id": row[0],
+        "timestamp": row[1],
+        "save_name": row[2],
+        "summary": row[3],
+        "priority_1": row[4],
+        "state": json.loads(row[5]) if row[5] else None,
+        "advice": json.loads(row[6]) if row[6] else None,
+    }
+
+
+@router.get("/api/trends")
+async def get_trends(save_name: str | None = None):
+    """Return time-series trend data with forecasts and game path assessment."""
+    db = _get_db()
+    if save_name:
+        rows = db.execute(
+            "SELECT id, timestamp, save_name, state_json, trajectory_label, trajectory_score, embedding FROM history WHERE save_name = ? AND state_json IS NOT NULL ORDER BY id ASC",
+            (save_name,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT id, timestamp, save_name, state_json, trajectory_label, trajectory_score, embedding FROM history WHERE state_json IS NOT NULL ORDER BY id ASC"
+        ).fetchall()
+
+    points = []
+    for row in rows:
+        state = json.loads(row[3]) if row[3] else None
+        if not state:
+            continue
+        meta = state.get("meta", {})
+        settlement = state.get("settlement", {})
+        pop = settlement.get("population", {})
+        resources = state.get("resources", {})
+        food = resources.get("food", {})
+        fuel = resources.get("fuel", {})
+        construction = resources.get("construction", {})
+        clothing = resources.get("clothing", {})
+        production = resources.get("production", {})
+        military = state.get("military", {})
+
+        families = (pop.get("families", 0) or 0) or 1
+        food_total = food.get("total", 0) or 0
+        firewood = fuel.get("firewood", 0) or 0
+        workers = pop.get("workers", 0) or 0
+
+        season = meta.get("season", "?")
+        season_short = season[:3] if len(season) >= 3 else season
+
+        points.append({
+            "id": row[0],
+            "timestamp": row[1],
+            "save_name": row[2],
+            "label": f"Y{meta.get('year', '?')} {season_short}",
+            "year": meta.get("year", 0),
+            "season": season,
+            "day": meta.get("day", 0),
+            "approval": settlement.get("approval", 0) or 0,
+            "families": pop.get("families", 0) or 0,
+            "workers": workers,
+            "homeless": pop.get("homeless", 0) or 0,
+            "food_total": food_total,
+            "firewood": firewood,
+            "charcoal": fuel.get("charcoal", 0) or 0,
+            "timber": construction.get("timber", 0) or 0,
+            "planks": construction.get("planks", 0) or 0,
+            "stone": construction.get("stone", 0) or 0,
+            "clay": construction.get("clay", 0) or 0,
+            "leather": clothing.get("leather", 0) or 0,
+            "linen": clothing.get("linen", 0) or 0,
+            "shoes": clothing.get("shoes", 0) or 0,
+            "cloaks": clothing.get("cloaks", 0) or 0,
+            "iron": production.get("iron", 0) or 0,
+            "ale": production.get("ale", 0) or 0,
+            "regional_wealth": settlement.get("regional_wealth", 0) or 0,
+            "development_points": state.get("development_points", 0) or 0,
+            "retinue_count": military.get("retinue_count", 0) or 0,
+            "bandit_camps_nearby": military.get("bandit_camps_nearby", 0) or 0,
+            "alert_count": len(state.get("alerts", [])),
+            "trajectory_label": row[4],
+            "trajectory_score": row[5],
+            # Derived metrics
+            "food_per_family": round(food_total / families, 1),
+            "firewood_per_family": round(firewood / families, 1),
+            "worker_ratio": round(workers / families, 2),
+        })
+
+    # Compute forecasts and game path
+    from src.analysis.trend_predictor import predict_trends
+    predictions = predict_trends(points)
+
+    # RAG: find similar past states for the current state
+    similar_states = []
+    if _current_state and points:
+        current_meta = _current_state.get("meta", {})
+        current_pop = _current_state.get("settlement", {}).get("population", {})
+        current_embedding_raw = db.execute(
+            "SELECT embedding FROM history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        current_embedding = json.loads(current_embedding_raw[0]) if current_embedding_raw and current_embedding_raw[0] else None
+
+        from src.analysis.rag_retriever import find_similar_states
+        similar_states = find_similar_states(
+            current_embedding=current_embedding,
+            current_year=current_meta.get("year", 1),
+            current_families=current_pop.get("families", 1),
+        )
+
+    return {
+        "points": points,
+        "forecasts": predictions.get("forecasts", []),
+        "slopes": predictions.get("slopes", {}),
+        "game_path": predictions.get("game_path"),
+        "similar_states": similar_states,
+        "count": len(points),
+    }
 
 
 @router.get("/api/logs")
