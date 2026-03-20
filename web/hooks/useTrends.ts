@@ -10,33 +10,51 @@ export interface TrendPoint {
   year: number;
   season: string;
   day: number;
+  // Settlement
   approval: number;
   families: number;
   workers: number;
   homeless: number;
+  regional_wealth: number;
+  development_points: number;
+  // Food
   food_total: number;
   food_per_family: number;
+  small_game: number;
+  mushrooms: number;
+  herbs: number;
+  berries: number;
+  meat: number;
+  bread: number;
+  vegetables: number;
+  eggs: number;
+  fish: number;
+  // Fuel
   firewood: number;
   firewood_per_family: number;
   charcoal: number;
+  // Construction
   timber: number;
   planks: number;
+  rubblestone: number;
   stone: number;
   clay: number;
+  tools: number;
+  // Clothing
+  pelts: number;
+  hides: number;
   leather: number;
-  linen: number;
   shoes: number;
   cloaks: number;
-  iron: number;
-  ale: number;
-  regional_wealth: number;
-  development_points: number;
+  // Military
   retinue_count: number;
   bandit_camps_nearby: number;
+  // Meta
   alert_count: number;
   worker_ratio: number;
   trajectory_label?: string;
   trajectory_score?: number;
+  [key: string]: string | number | undefined;
 }
 
 export interface ForecastPoint {

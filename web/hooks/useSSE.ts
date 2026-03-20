@@ -9,10 +9,11 @@ export interface Advice {
   priority_3?: string;
   situation?: string;
   next_season?: string;
+  road_ahead?: string;
 }
 
 export interface GameState {
-  meta?: { year?: number; season?: string; day?: number };
+  meta?: { year?: number; season?: string; day?: number; game_version?: string };
   settlement?: {
     name?: string;
     approval?: number;
@@ -26,33 +27,69 @@ export interface GameState {
       bread?: number;
       berries?: number;
       meat?: number;
+      small_game?: number;
       vegetables?: number;
       eggs?: number;
       fish?: number;
+      mushrooms?: number;
+      herbs?: number;
+      grain?: number;
+      flour?: number;
+      honey?: number;
+      apples?: number;
     };
     fuel?: { firewood?: number; charcoal?: number };
     construction?: {
       timber?: number;
       planks?: number;
       stone?: number;
+      rubblestone?: number;
       clay?: number;
+      tools?: number;
     };
     clothing?: {
+      hides?: number;
+      pelts?: number;
       leather?: number;
       linen?: number;
+      yarn?: number;
       shoes?: number;
       cloaks?: number;
     };
     production?: {
       iron?: number;
+      iron_ore?: number;
       ale?: number;
       malt?: number;
       flour?: number;
       yarn?: number;
+      tools?: number;
+      tiles?: number;
     };
+    military_goods?: {
+      shields?: number;
+      swords?: number;
+      bows?: number;
+      arrows?: number;
+      spears?: number;
+      polearms?: number;
+      helmets?: number;
+      armor?: number;
+      horses?: number;
+    };
+    trade_goods?: {
+      salt?: number;
+      dye?: number;
+      herbs?: number;
+      wax?: number;
+      candles?: number;
+      honey?: number;
+    };
+    other?: Record<string, number>;
   };
   buildings?: {
     type?: string;
+    count?: number;
     workers_assigned?: number;
     max_workers?: number;
     level?: number;

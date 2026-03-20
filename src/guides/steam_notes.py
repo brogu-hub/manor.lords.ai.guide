@@ -64,6 +64,7 @@ def fetch_patch_notes(count: int = 5) -> list[dict]:
         notes.append({
             "gid": item["gid"],
             "title": item.get("title", ""),
+            "url": item.get("url", ""),
             "date": item.get("date", 0),
             "date_str": datetime.fromtimestamp(item.get("date", 0)).strftime("%Y-%m-%d"),
             "content": _strip_html(item.get("contents", "")),

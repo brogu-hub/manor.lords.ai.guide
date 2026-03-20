@@ -7,7 +7,7 @@ interface Props {
   season?: string;
 }
 
-function ReadinessBar({ label, ratio }: { label: string; ratio: number }) {
+function ReadinessBar({ label, ratio, detail }: { label: string; ratio: number; detail: string }) {
   const pct = Math.min(Math.max(ratio * 100, 0), 100);
   const color =
     pct >= 75
@@ -20,7 +20,7 @@ function ReadinessBar({ label, ratio }: { label: string; ratio: number }) {
     <div className="space-y-1">
       <div className="flex justify-between text-xs">
         <span className="text-muted-foreground">{label}</span>
-        <span className="font-heading text-foreground">{Math.round(pct)}%</span>
+        <span className="font-heading text-foreground">{Math.round(pct)}% <span className="text-muted-foreground font-normal">({detail})</span></span>
       </div>
       <div className="h-2 bg-secondary rounded-full overflow-hidden">
         <div
@@ -42,12 +42,28 @@ export function WinterReadinessGauge({ latest, season }: Props) {
   }
 
   const families = latest.families || 1;
-  const foodRatio = latest.food_per_family / 8;
-  const fuelRatio = latest.firewood / (families * 3);
-  const clothingRatio = (latest.cloaks + latest.shoes) / (families * 2 || 1);
+
+  // Food: need ~8 per family to survive winter
+  const foodPerFamily = latest.food_per_family || 0;
+  const foodRatio = foodPerFamily / 8;
+
+  // Fuel: need ~5 firewood per family
+  const fwPerFamily = latest.firewood / families;
+  const fuelRatio = fwPerFamily / 5;
+
+  // Clothing: leather + pelts + hides available for processing
+  const clothingMaterials = (latest.leather || 0) + (latest.pelts || 0) + (latest.hides || 0);
+  const clothingRatio = clothingMaterials / (families * 2 || 1);
+
+  // Construction: timber + tools for repairs
+  const buildMaterials = (latest.timber || 0) + (latest.tools || 0);
+  const buildRatio = buildMaterials / (families * 3 || 1);
 
   const composite = Math.round(
-    ((Math.min(foodRatio, 1) + Math.min(fuelRatio, 1) + Math.min(clothingRatio, 1)) / 3) * 100
+    ((Math.min(foodRatio, 1) * 0.35) +
+     (Math.min(fuelRatio, 1) * 0.30) +
+     (Math.min(clothingRatio, 1) * 0.20) +
+     (Math.min(buildRatio, 1) * 0.15)) * 100
   );
 
   const compositeColor =
@@ -74,9 +90,26 @@ export function WinterReadinessGauge({ latest, season }: Props) {
         <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
       </div>
       <div className="space-y-2.5">
-        <ReadinessBar label="Food" ratio={foodRatio} />
-        <ReadinessBar label="Fuel" ratio={fuelRatio} />
-        <ReadinessBar label="Clothing" ratio={clothingRatio} />
+        <ReadinessBar
+          label="Food"
+          ratio={foodRatio}
+          detail={`${foodPerFamily.toFixed(0)}/family`}
+        />
+        <ReadinessBar
+          label="Fuel"
+          ratio={fuelRatio}
+          detail={`${fwPerFamily.toFixed(0)} fw/family`}
+        />
+        <ReadinessBar
+          label="Clothing"
+          ratio={clothingRatio}
+          detail={`${clothingMaterials.toFixed(0)} materials`}
+        />
+        <ReadinessBar
+          label="Materials"
+          ratio={buildRatio}
+          detail={`${buildMaterials.toFixed(0)} timber+tools`}
+        />
       </div>
     </div>
   );

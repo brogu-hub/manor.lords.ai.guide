@@ -96,7 +96,7 @@ export default function Popout() {
 
       {/* Chat */}
       <div className="flex-1 flex flex-col min-h-0 px-1.5 pb-1.5">
-        <ChatPanel askQuestion={askQuestion} hasState={!!gameState} />
+        <ChatPanel askQuestion={askQuestion} hasState={!!gameState} fillHeight />
       </div>
     </div>
   );

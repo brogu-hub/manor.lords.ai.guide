@@ -110,11 +110,18 @@ export function StateBar({ state }: Props) {
     typeof approval === "number" ? `${Math.round(approval)}%` : "-";
   const firewood =
     typeof fuel?.firewood === "number" ? Math.round(fuel.firewood) : "-";
+  const timber =
+    typeof construction?.timber === "number" ? Math.round(construction.timber) : "-";
+  const rubblestone =
+    typeof construction?.rubblestone === "number" ? Math.round(construction.rubblestone) : "-";
 
   return (
     <div className="col-span-full space-y-2">
       {/* Primary stats row */}
       <div className="flex gap-1.5 flex-wrap">
+        {meta.game_version && (
+          <StatItem label="Version" value={meta.game_version.replace("Version ", "")} small />
+        )}
         <StatItem label="Year" value={meta.year ?? "-"} />
         <StatItem label="Season" value={meta.season ?? "-"} />
         <StatItem label="Families" value={pop.families ?? "-"} />
@@ -135,6 +142,19 @@ export function StateBar({ state }: Props) {
               ? getStatus(firewood, 15, 5)
               : "normal"
           }
+        />
+        <StatItem
+          label="Timber"
+          value={timber}
+          status={
+            typeof timber === "number"
+              ? getStatus(timber, 10, 3)
+              : "normal"
+          }
+        />
+        <StatItem
+          label="Stone"
+          value={rubblestone}
         />
         <StatItem
           label="Approval"
@@ -177,12 +197,16 @@ export function StateBar({ state }: Props) {
           <ResourceGroup
             title="Food"
             items={[
-              { label: "Bread", value: food?.bread ?? 0 },
+              { label: "Small Game", value: food?.small_game ?? 0 },
+              { label: "Mushrooms", value: food?.mushrooms ?? 0 },
+              { label: "Herbs", value: food?.herbs ?? 0 },
               { label: "Berries", value: food?.berries ?? 0 },
               { label: "Meat", value: food?.meat ?? 0 },
+              { label: "Bread", value: food?.bread ?? 0 },
               { label: "Vegs", value: food?.vegetables ?? 0 },
               { label: "Eggs", value: food?.eggs ?? 0 },
               { label: "Fish", value: food?.fish ?? 0 },
+              { label: "Grain", value: food?.grain ?? 0 },
             ]}
           />
           <ResourceGroup
@@ -190,15 +214,19 @@ export function StateBar({ state }: Props) {
             items={[
               { label: "Timber", value: construction?.timber ?? 0 },
               { label: "Planks", value: construction?.planks ?? 0 },
+              { label: "Rubblestone", value: construction?.rubblestone ?? 0 },
               { label: "Stone", value: construction?.stone ?? 0 },
               { label: "Clay", value: construction?.clay ?? 0 },
+              { label: "Tools", value: construction?.tools ?? 0 },
             ]}
           />
           <ResourceGroup
             title="Clothing"
             items={[
+              { label: "Pelts", value: clothing?.pelts ?? 0 },
+              { label: "Hides", value: clothing?.hides ?? 0 },
               { label: "Leather", value: clothing?.leather ?? 0 },
-              { label: "Linen", value: clothing?.linen ?? 0 },
+              { label: "Yarn", value: clothing?.yarn ?? 0 },
               { label: "Shoes", value: clothing?.shoes ?? 0 },
               { label: "Cloaks", value: clothing?.cloaks ?? 0 },
             ]}
@@ -206,11 +234,12 @@ export function StateBar({ state }: Props) {
           <ResourceGroup
             title="Production"
             items={[
+              { label: "Iron Ore", value: production?.iron_ore ?? 0 },
               { label: "Iron", value: production?.iron ?? 0 },
               { label: "Ale", value: production?.ale ?? 0 },
               { label: "Malt", value: production?.malt ?? 0 },
               { label: "Flour", value: production?.flour ?? 0 },
-              { label: "Yarn", value: production?.yarn ?? 0 },
+              { label: "Tools", value: production?.tools ?? 0 },
             ]}
           />
 

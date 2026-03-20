@@ -298,31 +298,48 @@ async def get_trends(save_name: str | None = None):
             "year": meta.get("year", 0),
             "season": season,
             "day": meta.get("day", 0),
+            # Settlement
             "approval": settlement.get("approval", 0) or 0,
             "families": pop.get("families", 0) or 0,
             "workers": workers,
             "homeless": pop.get("homeless", 0) or 0,
-            "food_total": food_total,
-            "firewood": firewood,
-            "charcoal": fuel.get("charcoal", 0) or 0,
-            "timber": construction.get("timber", 0) or 0,
-            "planks": construction.get("planks", 0) or 0,
-            "stone": construction.get("stone", 0) or 0,
-            "clay": construction.get("clay", 0) or 0,
-            "leather": clothing.get("leather", 0) or 0,
-            "linen": clothing.get("linen", 0) or 0,
-            "shoes": clothing.get("shoes", 0) or 0,
-            "cloaks": clothing.get("cloaks", 0) or 0,
-            "iron": production.get("iron", 0) or 0,
-            "ale": production.get("ale", 0) or 0,
             "regional_wealth": settlement.get("regional_wealth", 0) or 0,
             "development_points": state.get("development_points", 0) or 0,
+            # Food (all types)
+            "food_total": food_total,
+            "small_game": food.get("small_game", 0) or 0,
+            "mushrooms": food.get("mushrooms", 0) or 0,
+            "herbs": food.get("herbs", 0) or 0,
+            "berries": food.get("berries", 0) or 0,
+            "meat": food.get("meat", 0) or 0,
+            "bread": food.get("bread", 0) or 0,
+            "vegetables": food.get("vegetables", 0) or 0,
+            "eggs": food.get("eggs", 0) or 0,
+            "fish": food.get("fish", 0) or 0,
+            # Fuel
+            "firewood": firewood,
+            "charcoal": fuel.get("charcoal", 0) or 0,
+            # Construction
+            "timber": construction.get("timber", 0) or 0,
+            "planks": construction.get("planks", 0) or 0,
+            "rubblestone": construction.get("rubblestone", 0) or 0,
+            "stone": construction.get("stone", 0) or 0,
+            "clay": construction.get("clay", 0) or 0,
+            "tools": construction.get("tools", 0) or 0,
+            # Clothing
+            "pelts": clothing.get("pelts", 0) or 0,
+            "hides": clothing.get("hides", 0) or 0,
+            "leather": clothing.get("leather", 0) or 0,
+            "shoes": clothing.get("shoes", 0) or 0,
+            "cloaks": clothing.get("cloaks", 0) or 0,
+            # Military
             "retinue_count": military.get("retinue_count", 0) or 0,
             "bandit_camps_nearby": military.get("bandit_camps_nearby", 0) or 0,
+            # Meta
             "alert_count": len(state.get("alerts", [])),
             "trajectory_label": row[4],
             "trajectory_score": row[5],
-            # Derived metrics
+            # Derived
             "food_per_family": round(food_total / families, 1),
             "firewood_per_family": round(firewood / families, 1),
             "worker_ratio": round(workers / families, 2),
@@ -356,6 +373,30 @@ async def get_trends(save_name: str | None = None):
         "game_path": predictions.get("game_path"),
         "similar_states": similar_states,
         "count": len(points),
+    }
+
+
+@router.get("/api/patch-notes")
+async def get_patch_notes():
+    """Return latest Manor Lords patch notes with Steam links."""
+    from src.config import STEAM_APP_ID
+    from src.guides.steam_notes import _load_stored, update_guide_cache
+    notes = _load_stored()
+    if not notes:
+        update_guide_cache()
+        notes = _load_stored()
+    return {
+        "notes": [
+            {
+                "title": n.get("title", ""),
+                "date": n.get("date_str", ""),
+                "gid": n.get("gid", ""),
+                "content": n.get("content", "")[:500],
+                "url": n.get("url") or f"https://steamcommunity.com/games/{STEAM_APP_ID}/announcements/detail/{n.get('gid', '')}",
+            }
+            for n in notes[:5]
+        ],
+        "store_url": f"https://store.steampowered.com/news/app/{STEAM_APP_ID}",
     }
 
 

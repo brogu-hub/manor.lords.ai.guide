@@ -15,9 +15,10 @@ interface Message {
 interface Props {
   askQuestion: (q: string) => Promise<string>;
   hasState: boolean;
+  fillHeight?: boolean;
 }
 
-export function ChatPanel({ askQuestion, hasState }: Props) {
+export function ChatPanel({ askQuestion, hasState, fillHeight }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,7 +53,7 @@ export function ChatPanel({ askQuestion, hasState }: Props) {
   }
 
   return (
-    <Card className="col-span-full bg-card border-border flex flex-col max-h-[300px]">
+    <Card className={`col-span-full bg-card border-border flex flex-col ${fillHeight ? "flex-1 min-h-0" : "max-h-[300px]"}`}>
       <CardHeader className="bg-[var(--color-panel-header)] border-b border-[var(--color-gold-dim)] py-2 px-4">
         <CardTitle className="font-heading text-xs font-semibold text-primary uppercase tracking-wider">
           Counsel Chamber
@@ -88,7 +89,7 @@ export function ChatPanel({ askQuestion, hasState }: Props) {
         </ScrollArea>
         <form
           onSubmit={handleSubmit}
-          className="flex gap-2 p-3 pt-0 border-t border-border"
+          className="flex gap-2 p-3 border-t border-border shrink-0"
         >
           <Input
             value={input}

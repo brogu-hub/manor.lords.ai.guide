@@ -12,6 +12,7 @@ class AdviceResponse(BaseModel):
     priority_3: str = ""
     situation: str = ""
     next_season: str = ""
+    road_ahead: str = ""
     raw_text: str = ""
 
 
@@ -33,10 +34,11 @@ def parse_advice(text: str) -> AdviceResponse:
         "PRIORITY_3": "",
         "SITUATION": "",
         "NEXT_SEASON": "",
+        "ROAD_AHEAD": "",
     }
 
     # Split by section headers
-    pattern = r"(WARNINGS|PRIORITY_1|PRIORITY_2|PRIORITY_3|SITUATION|NEXT_SEASON)\s*:\s*"
+    pattern = r"(WARNINGS|PRIORITY_1|PRIORITY_2|PRIORITY_3|SITUATION|NEXT_SEASON|ROAD_AHEAD)\s*:\s*"
     parts = re.split(pattern, text)
 
     # parts alternates: [preamble, key, value, key, value, ...]
@@ -64,5 +66,6 @@ def parse_advice(text: str) -> AdviceResponse:
         priority_3=sections["PRIORITY_3"],
         situation=sections["SITUATION"],
         next_season=sections["NEXT_SEASON"],
+        road_ahead=sections["ROAD_AHEAD"],
         raw_text=text,
     )

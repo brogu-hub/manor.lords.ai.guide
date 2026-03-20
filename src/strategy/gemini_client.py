@@ -106,20 +106,48 @@ def _get_fallback_chain() -> list[str]:
 
 # -- Context Cache --
 
+_cached_version: str | None = None
+
+
 def _ensure_cache(
     client: genai.Client,
     model_id: str,
     system_prompt: str,
     guide_context: str,
+    game_version: str = "",
 ) -> str | None:
-    """Create or reuse a Gemini context cache for system prompt + guides."""
-    global _cached_content_name, _cached_model
+    """Create or reuse a Gemini context cache for system prompt + guides + version.
 
-    if _cached_content_name and _cached_model == model_id:
+    The cache includes the game version so the AI "remembers" which version
+    it's advising for across the entire session without re-sending each call.
+    Cache is invalidated when the game version changes (e.g. player updates).
+    """
+    global _cached_content_name, _cached_model, _cached_version
+
+    # Reuse existing cache if model and version match
+    if (_cached_content_name and _cached_model == model_id
+            and _cached_version == game_version):
         return _cached_content_name
+
+    # Invalidate on version change
+    if _cached_version and _cached_version != game_version:
+        logger.info("Game version changed (%s → %s), refreshing cache", _cached_version, game_version)
+        _invalidate_cache()
 
     if not guide_context:
         return None
+
+    # Embed version context into the cached content
+    version_context = ""
+    if game_version:
+        version_context = (
+            f"\n\nCURRENT GAME VERSION: {game_version}\n"
+            f"All advice must be grounded in mechanics valid for this version. "
+            f"If patch notes describe changes for this or newer versions, incorporate them. "
+            f"Do not assume older version mechanics still apply.\n"
+        )
+
+    cached_content = version_context + guide_context
 
     try:
         cache = client.caches.create(
@@ -127,13 +155,14 @@ def _ensure_cache(
             config=types.CreateCachedContentConfig(
                 display_name="manor-lords-advisor",
                 system_instruction=system_prompt,
-                contents=[guide_context],
+                contents=[cached_content],
                 ttl=f"{CACHE_TTL_SECONDS}s",
             ),
         )
         _cached_content_name = cache.name
         _cached_model = model_id
-        logger.info("Created context cache: %s (model=%s)", cache.name, model_id)
+        _cached_version = game_version
+        logger.info("Created context cache: %s (model=%s, version=%s)", cache.name, model_id, game_version)
         return cache.name
     except Exception as e:
         logger.warning("Context caching not available for %s: %s", model_id, e)
@@ -142,9 +171,10 @@ def _ensure_cache(
 
 def _invalidate_cache():
     """Clear the cached content reference."""
-    global _cached_content_name, _cached_model
+    global _cached_content_name, _cached_model, _cached_version
     _cached_content_name = None
     _cached_model = None
+    _cached_version = None
 
 
 # -- Structural validation (no LLM cost) --
@@ -213,8 +243,10 @@ async def generate_advice(
     for attempt in range(1, 2 + MAX_EVAL_RETRIES):
         last_error = None
 
+        game_version = state.meta.game_version or ""
+
         for model_id in fallback_chain:
-            cache_name = _ensure_cache(client, model_id, system_prompt, guide_context)
+            cache_name = _ensure_cache(client, model_id, system_prompt, guide_context, game_version)
 
             if cache_name:
                 user_prompt = build_user_prompt(

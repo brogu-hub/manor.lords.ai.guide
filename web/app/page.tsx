@@ -18,6 +18,8 @@ import { UploadZone } from "~/components/UploadZone";
 import { PopOutButton } from "~/components/PopOutButton";
 import { TrendsPanel } from "~/components/TrendsPanel";
 import { RealmMapPanel } from "~/components/RealmMapPanel";
+import { PatchNotesPanel } from "~/components/PatchNotesPanel";
+import { RoadAheadPanel } from "~/components/RoadAheadPanel";
 
 export default function Dashboard() {
   const {
@@ -153,9 +155,11 @@ export default function Dashboard() {
         <PrioritiesPanel advice={advice} />
         <SituationPanel advice={advice} />
         <NextSeasonPanel advice={advice} />
+        <RoadAheadPanel advice={advice} />
 
         {!hasSaves && <UploadZone onUploaded={() => setHasSaves(true)} />}
 
+        <PatchNotesPanel gameVersion={gameState?.meta?.game_version} />
         <ChatPanel askQuestion={askQuestion} hasState={!!gameState} />
         <HistoryPanel
           entries={history}

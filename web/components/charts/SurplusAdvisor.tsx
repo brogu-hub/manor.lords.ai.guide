@@ -26,13 +26,13 @@ export function SurplusAdvisor({ latest }: Props) {
   const conditions: Condition[] = [
     {
       label: "Food surplus",
-      met: latest.food_per_family >= 10,
-      detail: `${latest.food_per_family.toFixed(1)}/family (need 10)`,
+      met: latest.food_per_family >= 15,
+      detail: `${latest.food_per_family.toFixed(0)}/family (need 15)`,
     },
     {
       label: "Fuel secured",
-      met: latest.firewood / families >= 5,
-      detail: `${(latest.firewood / families).toFixed(1)}/family (need 5)`,
+      met: latest.firewood / families >= 10,
+      detail: `${(latest.firewood / families).toFixed(0)}/family (need 10)`,
     },
     {
       label: "Approval stable",
@@ -41,18 +41,18 @@ export function SurplusAdvisor({ latest }: Props) {
     },
     {
       label: "Timber ready",
-      met: latest.timber >= 20,
-      detail: `${latest.timber.toFixed(0)} (need 20)`,
+      met: latest.timber >= 15,
+      detail: `${latest.timber.toFixed(0)} (need 15)`,
     },
     {
       label: "Stone available",
-      met: latest.stone >= 10,
-      detail: `${latest.stone.toFixed(0)} (need 10)`,
+      met: (latest.rubblestone || 0) + (latest.stone || 0) >= 10,
+      detail: `${((latest.rubblestone || 0) + (latest.stone || 0)).toFixed(0)} (need 10)`,
     },
     {
-      label: "Workforce active",
-      met: latest.worker_ratio >= 0.6,
-      detail: `${(latest.worker_ratio * 100).toFixed(0)}% assigned (need 60%)`,
+      label: "Tools stocked",
+      met: (latest.tools || 0) >= 3,
+      detail: `${(latest.tools || 0).toFixed(0)} (need 3)`,
     },
     {
       label: "No critical alerts",

@@ -38,8 +38,11 @@ def build_user_prompt(
 
     state_json = json.dumps(state.model_dump(), indent=2, ensure_ascii=False)
 
+    game_version = state.meta.game_version or "unknown"
+
     prompt = template.format(
         game_state_json=state_json,
+        game_version=game_version,
         session_context=session_context or "No previous session data available.",
         guide_context=guide_context or "",
     )

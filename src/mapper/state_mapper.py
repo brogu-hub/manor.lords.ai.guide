@@ -21,6 +21,7 @@ from src.mapper.schemas import (
     FuelState,
     GameState,
     MetaState,
+    MilitaryGoods,
     MilitaryState,
     PopulationState,
     ProductionState,
@@ -28,40 +29,60 @@ from src.mapper.schemas import (
     ResourceNode,
     ResourceState,
     SettlementState,
+    TaxState,
+    TradeGoods,
 )
 
 logger = logging.getLogger(__name__)
 
 # Manor Lords resource type ID → name mapping
-# Discovered from save file analysis
+# Based on official resource flowchart + save file analysis
 RESOURCE_TYPES = {
+    # === CONFIRMED by user (v0.8.065) ===
+    6: "tools",          # 8 matched exactly
+    9: "pelts",          # hunter's camp bi-product
+    15: "rubblestone",   # 10 matched exactly
+    16: "timber",        # sawpit produces this
+    17: "planks",        # 94 matched exactly
+    18: "herbs",         # forager hut produces alongside mushrooms
+    216: "firewood",     # woodcutter produces
+    279: "mushrooms",    # forager hut
+    330: "small_game",   # hunter's camp bi-product
+    146: "clay",          # confirmed v0.8.065
+    # === From resource flowchart (not yet confirmed in v0.8.065) ===
+    # Timber & fuel
     1: "timber",
-    3: "stone",
     4: "planks",
     5: "firewood",
-    6: "iron_ore",
-    7: "iron_slabs",
+    32: "charcoal",
+    172: "timber",
+    # Stone & construction
+    3: "stone",
     8: "clay",
-    9: "tiles",
+    257: "rubblestone",
+    # Food
     10: "bread",
     11: "flour",
-    12: "grain",  # wheat/emmer
-    13: "berries",
+    12: "grain",
+    13: "charcoal",      # confirmed v0.8.065 (was berries in old versions)
     14: "meat",
-    15: "hides",
-    16: "leather",
-    17: "linen",
-    18: "yarn",
-    23: "ale",
-    27: "malt",
     28: "vegetables",
     29: "eggs",
     30: "fish",
     31: "honey",
-    32: "charcoal",
-    33: "tools",
+    47: "herbs",
+    50: "apples",
+    # Animal products (IDs may differ in v0.8.065)
+    # Clothing & textiles
     34: "shoes",
     35: "cloaks",
+    # Industry
+    7: "iron_slabs",
+    33: "tools",
+    # Alcohol
+    23: "ale",
+    27: "malt",
+    # Military
     36: "shields",
     37: "swords",
     38: "bows",
@@ -70,28 +91,159 @@ RESOURCE_TYPES = {
     41: "polearms",
     42: "helmets",
     43: "armor",
+    # Trade & luxury
     44: "horses",
     45: "salt",
     46: "dye",
-    47: "herbs",
     48: "wax",
     49: "candles",
-    50: "apples",
-    172: "timber",  # Alternate timber ID seen in saves
-    216: "stone",   # Alternate stone ID seen in saves
-    234: "ox",      # Livestock
+    # Livestock
+    234: "ox",
 }
 
-# Building type ID → name mapping
+# Building type ID → name mapping (confirmed by user for v0.8.065)
 BUILDING_TYPES = {
+    3: "burgage_plot",        # residential (occupants, refuel, variety)
+    6: "trading_post",
+    7: "foresters_hut",      # plants trees, produces saplings
+    8: "burgage_plot",       # residential with extensions (chicken coop etc)
+    10: "pack_station",      # hp=0, no workers — logistics
+    13: "well",
+    18: "marketplace",
+    20: "communal_oven",     # hp=300, no workers — passive food processing
+    21: "stone_gatherer_camp",
+    26: "livestock_trading_post",  # refuel=True, no occupants
     30: "logging_camp",
-    39: "hitching_post",
-    85: "burgage_plot",
-    87: "well",
-    88: "storehouse",
-    100: "marketplace",
+    34: "church",
+    37: "sheep_pasture",     # hp=260, 1 worker — livestock grazing
+    42: "hitching_post",
+    59: "fishermans_hut",
+    68: "granary",
+    69: "farmhouse",         # confirmed: 4+3 workers on 2 farmhouses
+    72: "storehouse",
+    97: "sawpit",            # hp=55, produces planks
+    79: "field",             # hp=55, 1 worker — farmhouse field
+    112: "corpse_pit",       # hp=5 — sanitation
+    113: "pasture_fence",    # hp=0 — field boundary
     115: "road",
 }
+
+# cropType enum → building name (from resource flowchart)
+_CROP_BUILDING = {
+    "ECropType::AnimalTraps": "hunters_camp",
+    "ECropType::Wheat": "farmhouse",
+    "ECropType::Rye": "farmhouse",
+    "ECropType::Barley": "farmhouse",
+    "ECropType::Flax": "farmhouse",
+    "ECropType::Vegetables": "vegetable_garden",
+    "ECropType::Berries": "forager_hut",
+    "ECropType::Herbs": "forager_hut",
+    "ECropType::Mushrooms": "forager_hut",
+    "ECropType::Apples": "orchard",
+    "ECropType::Honey": "apiary",
+    "ECropType::Fish": "fishermans_hut",
+    "ECropType::Sheep": "sheep_farm",
+    "ECropType::Chickens": "chicken_coop",
+}
+
+
+def _identify_building(bld: dict) -> str:
+    """Identify a building from its save data properties.
+
+    Uses behavioral heuristics rather than hardcoded type IDs,
+    since IDs change between game versions.
+    """
+    bt = bld.get("bType_0", -1)
+
+    if bt in BUILDING_TYPES:
+        return BUILDING_TYPES[bt]
+
+    # Not yet constructed (planned/ghost)
+    if not bld.get("wasFullyConstructed_0", False) and bld.get("localHp_0", 0) < 1:
+        return "construction_site"
+
+    # Production: identified by crop type (check BEFORE residential)
+    crop = bld.get("cropType_0", "")
+    if crop in _CROP_BUILDING:
+        return _CROP_BUILDING[crop]
+
+    # Forager / gatherer: has work area + protect resource area + no crop
+    if (bld.get("bProtectResourceArea_0", False)
+        and crop not in _CROP_BUILDING
+        and not bld.get("occupantFamilyIDs_0")):
+        prod_types_check = {p.get("ItemType_0") for p in bld.get("productionLogMap_0", [])}
+        # Forager outputs: berries(13), mushrooms(279), herbs(18/47)
+        if prod_types_check.intersection({13, 18, 47, 279}):
+            return "forager_hut"
+
+    # Production: identified by what it produces (based on resource flowchart)
+    prod_types = {p.get("ItemType_0") for p in bld.get("productionLogMap_0", [])}
+    if prod_types:
+        # Timber & fuel chain
+        if 216 in prod_types or 5 in prod_types:
+            return "woodcutter_lodge"
+        if 16 in prod_types:
+            return "logging_camp"  # produces timber(16)
+        if 32 in prod_types:
+            return "charcoal_kiln"
+        # Stone chain
+        if 257 in prod_types or 3 in prod_types:
+            return "stone_gatherer_camp"
+        if 15 in prod_types:
+            return "stonemason"  # produces rubblestone(15)
+        # Mining & metal
+        if 7 in prod_types:
+            return "bloomery"
+        if 6 in prod_types or 33 in prod_types:
+            return "smithy"  # produces tools(6)
+        # Food processing
+        if 11 in prod_types:
+            return "windmill"
+        if 10 in prod_types:
+            return "bakery"
+        if 27 in prod_types:
+            return "malthouse"
+        if 23 in prod_types:
+            return "brewery"
+        # Clothing
+        if 17 in prod_types and not prod_types.intersection({279, 13}):
+            return "weaver_workshop"  # produces linen(17) but not forager
+        if 34 in prod_types:
+            return "cobbler_workshop"
+        if 35 in prod_types:
+            return "tailor_workshop"
+        # Military
+        if {36, 37, 40, 41}.intersection(prod_types):
+            return "blacksmith_workshop"
+        if {38}.intersection(prod_types):
+            return "bowyer_workshop"
+        if {42, 43}.intersection(prod_types):
+            return "armory"
+
+    # Residential: MUST have actual occupants or houseVariety > 0 (actual house, not empty field)
+    occupants = bld.get("occupantFamilyIDs_0")
+    has_occupants = occupants is not None and len(occupants) > 0
+    is_house = bld.get("houseVariety_0", -1) > 0
+    if has_occupants and is_house:
+        return "burgage_plot"
+
+    # Storage: has inventory but no production, no occupants living in it
+    inv = bld.get("Inventory_0", [])
+    has_items = any(isinstance(i, dict) and i.get("amt_0", 0) > 0 for i in inv)
+    if has_items and not prod_types and not has_occupants:
+        # Storehouses have assigned families or high HP; ground stockpiles are simpler
+        assigned = bld.get("assignedFamilyIDs_0", [])
+        hp = bld.get("localHp_0", 0)
+        if (assigned and len(assigned) > 0) or hp >= 50:
+            return "storehouse"
+        return "stockpile"
+
+    # Shelter: has occupants but not a proper house
+    if has_occupants and not is_house:
+        return "shelter"
+
+    # Fallback
+    return f"building_{bt}"
 
 # Day-to-season mapping (Manor Lords has ~365 days/year)
 def _day_to_season(day: int) -> str:
@@ -126,9 +278,35 @@ def _find_player_lord(lords: list) -> dict | None:
     return lords[0] if lords else None
 
 
-def _aggregate_resources(buildings: list) -> dict[str, float]:
-    """Sum up all resources across building inventories."""
+# Ground resource type → resource name
+_GROUND_RESOURCE_MAP = {
+    "res_tree": "timber",
+    "res_plank": "planks",
+    "res_stone": "stone",
+    "res_firewood": "firewood",
+}
+
+
+def _count_ground_resources(saved_resources: list) -> dict[str, float]:
+    """Count loose resources on the ground (felled trees, dropped goods)."""
     totals: dict[str, float] = {}
+    for res in saved_resources:
+        res_type = res.get("resType_0", "")
+        name = _GROUND_RESOURCE_MAP.get(res_type)
+        if name:
+            totals[name] = totals.get(name, 0) + 1
+    return totals
+
+
+def _aggregate_resources(buildings: list, ground_resources: list | None = None) -> dict[str, float]:
+    """Sum up all resources across building inventories and ground."""
+    totals: dict[str, float] = {}
+
+    # Ground resources (felled trees etc)
+    if ground_resources:
+        for name, count in _count_ground_resources(ground_resources).items():
+            totals[name] = totals.get(name, 0) + count
+
     for bld in buildings:
         for item in bld.get("Inventory_0", []):
             if not isinstance(item, dict):
@@ -152,25 +330,40 @@ def _count_units(units: list) -> dict:
 
 
 def _count_buildings(buildings: list) -> list[BuildingInfo]:
-    """Count buildings by type for the building list."""
-    type_counts = Counter()
-    type_workers = Counter()
-    for bld in buildings:
-        bt = bld.get("bType_0", -1)
-        name = BUILDING_TYPES.get(bt, f"building_{bt}")
-        if name == "road":
-            continue  # Skip roads
-        type_counts[name] += 1
-        type_workers[name] += bld.get("activeWorkers_0", 0)
+    """List buildings with worker assignments.
 
-    return [
-        BuildingInfo(
-            type=name,
-            workers_assigned=type_workers[name],
-            level=1,
-        )
-        for name, count in type_counts.most_common()
+    Buildings with workers are listed individually so the AI sees
+    exact allocation per building (e.g. farmhouse #1: 4, farmhouse #2: 3).
+    Empty buildings are grouped by type with a count.
+    """
+    individual: list[BuildingInfo] = []
+    empty_counts: Counter = Counter()
+
+    for bld in buildings:
+        name = _identify_building(bld)
+        if name in ("road", "construction_site"):
+            continue
+        workers = bld.get("activeWorkers_0", 0)
+        assigned = bld.get("assignedFamilyIDs_0", [])
+        num_assigned = len(assigned) if assigned else workers
+
+        if num_assigned > 0:
+            individual.append(BuildingInfo(
+                type=name,
+                count=1,
+                workers_assigned=num_assigned,
+                level=1,
+            ))
+        else:
+            empty_counts[name] += 1
+
+    # Add grouped empty buildings
+    grouped = [
+        BuildingInfo(type=name, count=count, workers_assigned=0, level=1)
+        for name, count in empty_counts.most_common()
     ]
+
+    return individual + grouped
 
 
 # Resource node type → medieval name
@@ -293,10 +486,13 @@ def map_state(raw_json: dict) -> GameState:
     day = props.get("day_0", 0)
     season = _day_to_season(day)
 
+    game_version = props.get("Version_0", "")
+
     meta = MetaState(
         year=year,
         season=season,
         day=day,
+        game_version=game_version,
     )
 
     # Find player region
@@ -322,29 +518,54 @@ def map_state(raw_json: dict) -> GameState:
     lords = props.get("savedLords_0", [])
     player_lord = _find_player_lord(lords)
 
+    # Tax rates
+    tax_rates = player_region.get("taxRates_0", [])
+    tax_map = {t.get("key", ""): t.get("value", 0) for t in tax_rates if isinstance(t, dict)}
+
     settlement = SettlementState(
         name=player_region.get("CustomName_0", "Unknown"),
         approval=player_region.get("Approval_0", 0),
         population=population,
         regional_wealth=player_region.get("regionalWealth_0", 0),
         lord_personal_wealth=player_lord.get("treasury_0", 0) if player_lord else 0,
+        lord_influence=player_lord.get("influence_0", 0) if player_lord else 0,
+        taxes=TaxState(
+            land_tax=tax_map.get("land", 0),
+            tithe=tax_map.get("tithe", 0),
+        ),
     )
 
     # Resources — aggregate from all building inventories
     buildings = props.get("savedBuildings_0", [])
-    resources = _aggregate_resources(buildings)
+    ground_resources = props.get("savedResources_0", [])
+    resources = _aggregate_resources(buildings, ground_resources)
+
+    # Categorise all resources
+    _FOOD_KEYS = {"bread", "berries", "meat", "small_game", "vegetables", "eggs", "fish", "honey", "apples", "grain", "flour", "mushrooms", "herbs"}
+    _FUEL_KEYS = {"firewood", "charcoal"}
+    _CONSTRUCTION_KEYS = {"timber", "planks", "stone", "rubblestone", "clay", "tools"}
+    _CLOTHING_KEYS = {"leather", "linen", "shoes", "cloaks", "hides", "pelts", "yarn"}
+    _PRODUCTION_KEYS = {"iron_slabs", "iron_ore", "ale", "malt", "tools"}
+    _MILITARY_KEYS = {"shields", "swords", "bows", "arrows", "spears", "polearms", "helmets", "armor", "horses"}
+    _TRADE_KEYS = {"salt", "dye", "herbs", "wax", "candles"}
+    _SKIP_KEYS = {"ox"}
+    _ALL_KNOWN = _FOOD_KEYS | _FUEL_KEYS | _CONSTRUCTION_KEYS | _CLOTHING_KEYS | _PRODUCTION_KEYS | _MILITARY_KEYS | _TRADE_KEYS | _SKIP_KEYS
 
     food = FoodState(
-        total=sum(resources.get(k, 0) for k in [
-            "bread", "berries", "meat", "vegetables", "eggs", "fish",
-            "honey", "apples", "grain",
-        ]),
+        total=sum(resources.get(k, 0) for k in _FOOD_KEYS),
         bread=resources.get("bread", 0),
         berries=resources.get("berries", 0),
         meat=resources.get("meat", 0),
+        small_game=resources.get("small_game", 0),
         vegetables=resources.get("vegetables", 0),
         eggs=resources.get("eggs", 0),
         fish=resources.get("fish", 0),
+        mushrooms=resources.get("mushrooms", 0),
+        herbs=resources.get("herbs", 0),
+        grain=resources.get("grain", 0),
+        flour=resources.get("flour", 0),
+        honey=resources.get("honey", 0),
+        apples=resources.get("apples", 0),
     )
 
     fuel = FuelState(
@@ -356,23 +577,58 @@ def map_state(raw_json: dict) -> GameState:
         timber=resources.get("timber", 0),
         planks=resources.get("planks", 0),
         stone=resources.get("stone", 0),
+        rubblestone=resources.get("rubblestone", 0),
         clay=resources.get("clay", 0),
+        tools=resources.get("tools", 0),
     )
 
     clothing = ClothingState(
+        hides=resources.get("hides", 0),
+        pelts=resources.get("pelts", 0),
         leather=resources.get("leather", 0),
         linen=resources.get("linen", 0),
+        yarn=resources.get("yarn", 0),
         shoes=resources.get("shoes", 0),
         cloaks=resources.get("cloaks", 0),
     )
 
     production = ProductionState(
         iron=resources.get("iron_slabs", 0),
+        iron_ore=resources.get("iron_ore", 0),
         ale=resources.get("ale", 0),
         malt=resources.get("malt", 0),
         flour=resources.get("flour", 0),
         yarn=resources.get("yarn", 0),
+        tools=resources.get("tools", 0),
+        tiles=resources.get("tiles", 0),
     )
+
+    military_goods = MilitaryGoods(
+        shields=resources.get("shields", 0),
+        swords=resources.get("swords", 0),
+        bows=resources.get("bows", 0),
+        arrows=resources.get("arrows", 0),
+        spears=resources.get("spears", 0),
+        polearms=resources.get("polearms", 0),
+        helmets=resources.get("helmets", 0),
+        armor=resources.get("armor", 0),
+        horses=resources.get("horses", 0),
+    )
+
+    trade_goods = TradeGoods(
+        salt=resources.get("salt", 0),
+        dye=resources.get("dye", 0),
+        herbs=resources.get("herbs", 0),
+        wax=resources.get("wax", 0),
+        candles=resources.get("candles", 0),
+        honey=resources.get("honey", 0),
+    )
+
+    # Catch-all: any resource not in a known category
+    other_resources = {
+        k: v for k, v in resources.items()
+        if k not in _ALL_KNOWN and v > 0
+    }
 
     resource_state = ResourceState(
         food=food,
@@ -380,6 +636,9 @@ def map_state(raw_json: dict) -> GameState:
         construction=construction,
         clothing=clothing,
         production=production,
+        military_goods=military_goods,
+        trade_goods=trade_goods,
+        other=other_resources,
     )
 
     # Buildings
